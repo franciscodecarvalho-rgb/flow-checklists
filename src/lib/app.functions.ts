@@ -11,6 +11,26 @@ export type EventType = "status_change" | "comment" | "ticket_opened";
 // Helper to get an untyped client (types.ts is regenerated async).
 const db = (ctx: { supabase: unknown }) => ctx.supabase as any;
 
+// Resolve display names for a set of user ids using the safe public view.
+// `profiles_public` only exposes id + full_name.
+async function resolveNames(
+  supa: any,
+  ids: (string | null | undefined)[],
+): Promise<Map<string, string>> {
+  const unique = Array.from(new Set(ids.filter((x): x is string => !!x)));
+  if (unique.length === 0) return new Map();
+  const { data, error } = await supa
+    .from("profiles_public")
+    .select("id, full_name")
+    .in("id", unique);
+  if (error) throw new Error(error.message);
+  const map = new Map<string, string>();
+  for (const r of data as { id: string; full_name: string | null }[]) {
+    map.set(r.id, r.full_name || "—");
+  }
+  return map;
+}
+
 // ============================================================
 // AREAS
 // ============================================================
@@ -99,7 +119,7 @@ export const listHome = createServerFn({ method: "GET" })
         .order("nome", { ascending: true }),
       supa
         .from("lists")
-        .select("id, titulo, area_id, owner_id, created_at, updated_at, profiles:owner_id(full_name, email)")
+        .select("id, titulo, area_id, owner_id, created_at, updated_at")
         .order("titulo", { ascending: true }),
       supa.from("items").select("list_id, status"),
     ]);
@@ -122,15 +142,17 @@ export const listHome = createServerFn({ method: "GET" })
       owner_id: string;
       created_at: string;
       updated_at: string;
-      profiles: { full_name: string | null; email: string } | null;
     };
 
-    const lists = (listsRes.data as ListRow[]).map((l) => ({
+    const rows = listsRes.data as ListRow[];
+    const names = await resolveNames(supa, rows.map((l) => l.owner_id));
+
+    const lists = rows.map((l) => ({
       id: l.id,
       titulo: l.titulo,
       area_id: l.area_id,
       owner_id: l.owner_id,
-      owner_name: l.profiles?.full_name || l.profiles?.email || "—",
+      owner_name: names.get(l.owner_id) ?? "—",
       counts: counts.get(l.id) ?? { pending: 0, in_progress: 0, done: 0, total: 0 },
     }));
 
@@ -150,11 +172,13 @@ export const getListDetail = createServerFn({ method: "GET" })
     const supa = db(context);
     const { data: list, error } = await supa
       .from("lists")
-      .select("id, titulo, area_id, owner_id, created_at, updated_at, areas:area_id(nome), profiles:owner_id(full_name, email)")
+      .select("id, titulo, area_id, owner_id, created_at, updated_at, areas:area_id(nome)")
       .eq("id", data.id)
       .maybeSingle();
     if (error) throw new Error(error.message);
     if (!list) throw new Error("Lista não encontrada");
+
+    const names = await resolveNames(supa, [list.owner_id as string]);
 
     const { data: items, error: itemsErr } = await supa
       .from("items")
@@ -169,7 +193,7 @@ export const getListDetail = createServerFn({ method: "GET" })
       area_id: list.area_id as string,
       area_nome: (list.areas?.nome as string) ?? "",
       owner_id: list.owner_id as string,
-      owner_name: (list.profiles?.full_name as string) || (list.profiles?.email as string) || "—",
+      owner_name: names.get(list.owner_id as string) ?? "—",
       items: items as { id: string; texto: string; status: ItemStatus; ordem: number }[],
     };
   });
@@ -192,10 +216,19 @@ export const getItemDetail = createServerFn({ method: "GET" })
 
     const { data: events, error: evErr } = await supa
       .from("item_events")
-      .select("id, tipo, payload, created_at, author_id, profiles:author_id(full_name, email)")
+      .select("id, tipo, payload, created_at, author_id")
       .eq("item_id", data.id)
       .order("created_at", { ascending: false });
     if (evErr) throw new Error(evErr.message);
+
+    const evRows = (events ?? []) as {
+      id: string;
+      tipo: EventType;
+      payload: Record<string, string | number | null> | null;
+      created_at: string;
+      author_id: string | null;
+    }[];
+    const names = await resolveNames(supa, evRows.map((e) => e.author_id));
 
     return {
       id: item.id as string,
@@ -204,13 +237,12 @@ export const getItemDetail = createServerFn({ method: "GET" })
       list_id: item.list_id as string,
       list_titulo: (item.lists?.titulo as string) ?? "",
       list_owner_id: (item.lists?.owner_id as string) ?? "",
-      events: (events as any[]).map((e) => ({
-        id: e.id as string,
-        tipo: e.tipo as EventType,
+      events: evRows.map((e) => ({
+        id: e.id,
+        tipo: e.tipo,
         payload: (e.payload ?? {}) as Record<string, string | number | null>,
-        created_at: e.created_at as string,
-        author_name:
-          (e.profiles?.full_name as string) || (e.profiles?.email as string) || "Sistema",
+        created_at: e.created_at,
+        author_name: (e.author_id && names.get(e.author_id)) || "Sistema",
       })),
     };
   });
@@ -358,10 +390,10 @@ export const updateItemStatus = createServerFn({ method: "POST" })
     }).parse(input),
   )
   .handler(async ({ data, context }) => {
-    const { error } = await db(context)
-      .from("items")
-      .update({ status: data.status })
-      .eq("id", data.id);
+    const { error } = await db(context).rpc("set_item_status", {
+      _item_id: data.id,
+      _status: data.status,
+    });
     if (error) throw new Error(error.message);
     return { ok: true };
   });
