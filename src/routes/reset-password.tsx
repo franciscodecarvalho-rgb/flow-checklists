@@ -27,8 +27,8 @@ function ResetPasswordPage() {
       }
     });
     // Also check existing session in case event already fired
-    supabase.auth.getSession().then(({ data }) => {
-      if (data.session) setReady(true);
+    supabase.auth.getSession().then(({ data: sessionData }) => {
+      if (sessionData.session) setReady(true);
     });
     return () => data.subscription.unsubscribe();
   }, []);
