@@ -82,6 +82,7 @@ export const createArea = createServerFn({ method: "POST" })
     }).parse(input),
   )
   .handler(async ({ data, context }) => {
+    await assertAdmin(context);
     const { data: row, error } = await db(context)
       .from("areas")
       .insert({ nome: data.nome, ordem: data.ordem })
