@@ -11,6 +11,26 @@ export type EventType = "status_change" | "comment" | "ticket_opened";
 // Helper to get an untyped client (types.ts is regenerated async).
 const db = (ctx: { supabase: unknown }) => ctx.supabase as any;
 
+// Resolve display names for a set of user ids using the safe public view.
+// `profiles_public` only exposes id + full_name.
+async function resolveNames(
+  supa: any,
+  ids: (string | null | undefined)[],
+): Promise<Map<string, string>> {
+  const unique = Array.from(new Set(ids.filter((x): x is string => !!x)));
+  if (unique.length === 0) return new Map();
+  const { data, error } = await supa
+    .from("profiles_public")
+    .select("id, full_name")
+    .in("id", unique);
+  if (error) throw new Error(error.message);
+  const map = new Map<string, string>();
+  for (const r of data as { id: string; full_name: string | null }[]) {
+    map.set(r.id, r.full_name || "—");
+  }
+  return map;
+}
+
 // ============================================================
 // AREAS
 // ============================================================
