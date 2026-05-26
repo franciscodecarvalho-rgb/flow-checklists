@@ -49,13 +49,16 @@ function HomePage() {
   const grouped = useMemo(() => {
     if (!homeQ.data) return [];
     const term = q.trim().toLowerCase();
-    return homeQ.data.areas.map((a) => ({
-      area: a,
-      lists: homeQ.data!.lists
-        .filter((l) => l.area_id === a.id)
-        .filter((l) => !term || l.titulo.toLowerCase().includes(term)),
-    }));
+    return homeQ.data.areas
+      .map((a) => ({
+        area: a,
+        lists: homeQ.data!.lists
+          .filter((l) => l.area_id === a.id)
+          .filter((l) => !term || l.titulo.toLowerCase().includes(term)),
+      }))
+      .filter(({ lists }) => lists.length > 0);
   }, [homeQ.data, q]);
+
 
   return (
     <div className="space-y-6">
@@ -102,50 +105,47 @@ function HomePage() {
       )}
 
       {grouped.length === 0 && !homeQ.isLoading && (
-        <EmptyState message="Nenhuma área cadastrada. Peça a um admin para criar." />
+        <EmptyState message={q ? "Nenhuma lista encontrada." : "Nenhuma lista ainda. Clique em “Nova lista” para começar."} />
       )}
 
       <div className="space-y-8">
         {grouped.map(({ area, lists }) => (
           <section key={area.id} className="space-y-3">
             <h2 className="text-lg font-semibold">{area.nome}</h2>
-            {lists.length === 0 ? (
-              <p className="text-sm text-muted-foreground">Sem listas nesta área.</p>
-            ) : (
-              <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-                {lists.map((l) => (
-                  <Link key={l.id} to="/listas/$id" params={{ id: l.id }} className="block">
-                    <Card className="h-full transition hover:border-primary/50 hover:shadow-md">
-                      <CardHeader className="pb-2">
-                        <CardTitle className="text-base">{l.titulo}</CardTitle>
-                        <p className="text-xs text-muted-foreground">por {l.owner_name}</p>
-                      </CardHeader>
-                      <CardContent className="flex flex-wrap gap-2 text-xs">
-                        <Badge variant="secondary">{l.counts.total} itens</Badge>
-                        {l.counts.pending > 0 && (
-                          <Badge variant="outline" className="border-amber-500/40 text-amber-700 dark:text-amber-300">
-                            {l.counts.pending} pend.
-                          </Badge>
-                        )}
-                        {l.counts.in_progress > 0 && (
-                          <Badge variant="outline" className="border-blue-500/40 text-blue-700 dark:text-blue-300">
-                            {l.counts.in_progress} em and.
-                          </Badge>
-                        )}
-                        {l.counts.done > 0 && (
-                          <Badge variant="outline" className="border-emerald-500/40 text-emerald-700 dark:text-emerald-300">
-                            {l.counts.done} ok
-                          </Badge>
-                        )}
-                      </CardContent>
-                    </Card>
-                  </Link>
-                ))}
-              </div>
-            )}
+            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+              {lists.map((l) => (
+                <Link key={l.id} to="/listas/$id" params={{ id: l.id }} className="block">
+                  <Card className="h-full transition hover:border-primary/50 hover:shadow-md">
+                    <CardHeader className="pb-2">
+                      <CardTitle className="text-base">{l.titulo}</CardTitle>
+                      <p className="text-xs text-muted-foreground">por {l.owner_name}</p>
+                    </CardHeader>
+                    <CardContent className="flex flex-wrap gap-2 text-xs">
+                      <Badge variant="secondary">{l.counts.total} itens</Badge>
+                      {l.counts.pending > 0 && (
+                        <Badge variant="outline" className="border-amber-500/40 text-amber-700 dark:text-amber-300">
+                          {l.counts.pending} pend.
+                        </Badge>
+                      )}
+                      {l.counts.in_progress > 0 && (
+                        <Badge variant="outline" className="border-blue-500/40 text-blue-700 dark:text-blue-300">
+                          {l.counts.in_progress} em and.
+                        </Badge>
+                      )}
+                      {l.counts.done > 0 && (
+                        <Badge variant="outline" className="border-emerald-500/40 text-emerald-700 dark:text-emerald-300">
+                          {l.counts.done} ok
+                        </Badge>
+                      )}
+                    </CardContent>
+                  </Card>
+                </Link>
+              ))}
+            </div>
           </section>
         ))}
       </div>
+
     </div>
   );
 }
