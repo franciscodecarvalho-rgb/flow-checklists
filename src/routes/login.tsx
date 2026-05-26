@@ -56,7 +56,8 @@ function LoginPage() {
         toast.success("Conta criada. Verifique seu email para confirmar.");
       }
     } catch (err) {
-      const message = err instanceof Error ? err.message : "Erro desconhecido";
+      let message = err instanceof Error ? err.message : "Erro desconhecido";
+      message = message.replace(/^Database error saving new user:\s*/i, "");
       toast.error(message);
     } finally {
       setSubmitting(false);

@@ -31,13 +31,6 @@ export function AppHeader() {
               >
                 Áreas
               </Link>
-              <Link
-                to="/admin/listas"
-                className="text-muted-foreground hover:text-foreground"
-                activeProps={{ className: "text-foreground font-medium" }}
-              >
-                Todas as listas
-              </Link>
             </nav>
           )}
         </div>
