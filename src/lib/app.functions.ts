@@ -390,10 +390,10 @@ export const updateItemStatus = createServerFn({ method: "POST" })
     }).parse(input),
   )
   .handler(async ({ data, context }) => {
-    const { error } = await db(context)
-      .from("items")
-      .update({ status: data.status })
-      .eq("id", data.id);
+    const { error } = await db(context).rpc("set_item_status", {
+      _item_id: data.id,
+      _status: data.status,
+    });
     if (error) throw new Error(error.message);
     return { ok: true };
   });
