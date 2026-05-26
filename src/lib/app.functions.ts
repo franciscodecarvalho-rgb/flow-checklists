@@ -11,6 +11,33 @@ export type EventType = "status_change" | "comment" | "ticket_opened";
 // Helper to get an untyped client (types.ts is regenerated async).
 const db = (ctx: { supabase: unknown }) => ctx.supabase as any;
 
+// Map raw Postgres/PostgREST errors to safe, user-facing messages.
+// Internal details are logged server-side only.
+function safeDbError(err: { code?: string; message?: string } | null | undefined, fallback = "Operação falhou. Tente novamente."): Error {
+  if (!err) return new Error(fallback);
+  // Log full detail server-side for debugging
+  console.error("[db]", err);
+  const code = err.code;
+  if (code === "23505") return new Error("Já existe um registro com esse identificador.");
+  if (code === "23503") return new Error("Operação inválida: registro referenciado por outros dados.");
+  if (code === "23502") return new Error("Campo obrigatório ausente.");
+  if (code === "23514") return new Error("Valor inválido para um dos campos.");
+  if (code === "42501" || code === "PGRST301") return new Error("Você não tem permissão para esta operação.");
+  if (code === "PGRST116") return new Error("Registro não encontrado.");
+  return new Error(fallback);
+}
+
+// Throws if the current user is not an admin. Use for admin-only server functions.
+async function assertAdmin(ctx: { supabase: unknown; userId: string }): Promise<void> {
+  const { data, error } = await (ctx.supabase as any)
+    .from("profiles")
+    .select("is_admin")
+    .eq("id", ctx.userId)
+    .maybeSingle();
+  if (error) throw safeDbError(error, "Falha ao verificar permissões.");
+  if (!data?.is_admin) throw new Error("Apenas administradores");
+}
+
 // Resolve display names for a set of user ids using the safe public view.
 // `profiles_public` only exposes id + full_name.
 async function resolveNames(
