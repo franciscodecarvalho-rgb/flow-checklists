@@ -65,13 +65,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       return;
     }
     let cancelled = false;
-    supabase
-      .from("profiles")
+    (supabase.from as any)("profiles")
       .select("id, email, full_name, is_admin")
       .eq("id", session.user.id)
       .maybeSingle()
-      .then(({ data }) => {
-        if (!cancelled) setProfile((data as Profile) ?? null);
+      .then(({ data }: { data: Profile | null }) => {
+        if (!cancelled) setProfile(data ?? null);
       });
     return () => {
       cancelled = true;
