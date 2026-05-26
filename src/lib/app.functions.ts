@@ -118,6 +118,7 @@ export const deleteArea = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator((input) => z.object({ id: z.string().uuid() }).parse(input))
   .handler(async ({ data, context }) => {
+    await assertAdmin(context);
     const supa = db(context);
     const { count, error: countErr } = await supa
       .from("lists")
