@@ -193,7 +193,7 @@ export const getListDetail = createServerFn({ method: "GET" })
       area_id: list.area_id as string,
       area_nome: (list.areas?.nome as string) ?? "",
       owner_id: list.owner_id as string,
-      owner_name: (list.profiles?.full_name as string) || (list.profiles?.email as string) || "—",
+      owner_name: names.get(list.owner_id as string) ?? "—",
       items: items as { id: string; texto: string; status: ItemStatus; ordem: number }[],
     };
   });
@@ -216,10 +216,19 @@ export const getItemDetail = createServerFn({ method: "GET" })
 
     const { data: events, error: evErr } = await supa
       .from("item_events")
-      .select("id, tipo, payload, created_at, author_id, profiles:author_id(full_name, email)")
+      .select("id, tipo, payload, created_at, author_id")
       .eq("item_id", data.id)
       .order("created_at", { ascending: false });
     if (evErr) throw new Error(evErr.message);
+
+    const evRows = (events ?? []) as {
+      id: string;
+      tipo: EventType;
+      payload: Record<string, string | number | null> | null;
+      created_at: string;
+      author_id: string | null;
+    }[];
+    const names = await resolveNames(supa, evRows.map((e) => e.author_id));
 
     return {
       id: item.id as string,
@@ -228,13 +237,12 @@ export const getItemDetail = createServerFn({ method: "GET" })
       list_id: item.list_id as string,
       list_titulo: (item.lists?.titulo as string) ?? "",
       list_owner_id: (item.lists?.owner_id as string) ?? "",
-      events: (events as any[]).map((e) => ({
-        id: e.id as string,
-        tipo: e.tipo as EventType,
+      events: evRows.map((e) => ({
+        id: e.id,
+        tipo: e.tipo,
         payload: (e.payload ?? {}) as Record<string, string | number | null>,
-        created_at: e.created_at as string,
-        author_name:
-          (e.profiles?.full_name as string) || (e.profiles?.email as string) || "Sistema",
+        created_at: e.created_at,
+        author_name: (e.author_id && names.get(e.author_id)) || "Sistema",
       })),
     };
   });
