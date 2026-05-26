@@ -102,6 +102,7 @@ export const updateArea = createServerFn({ method: "POST" })
     }).parse(input),
   )
   .handler(async ({ data, context }) => {
+    await assertAdmin(context);
     const { id, ...patch } = data;
     const { data: row, error } = await db(context)
       .from("areas")
