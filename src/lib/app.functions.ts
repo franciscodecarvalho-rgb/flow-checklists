@@ -207,7 +207,7 @@ export const getItemDetail = createServerFn({ method: "GET" })
       events: (events as any[]).map((e) => ({
         id: e.id as string,
         tipo: e.tipo as EventType,
-        payload: e.payload as Record<string, unknown>,
+        payload: (e.payload ?? {}) as Record<string, string | number | null>,
         created_at: e.created_at as string,
         author_name:
           (e.profiles?.full_name as string) || (e.profiles?.email as string) || "Sistema",
