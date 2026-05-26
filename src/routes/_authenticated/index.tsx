@@ -49,13 +49,16 @@ function HomePage() {
   const grouped = useMemo(() => {
     if (!homeQ.data) return [];
     const term = q.trim().toLowerCase();
-    return homeQ.data.areas.map((a) => ({
-      area: a,
-      lists: homeQ.data!.lists
-        .filter((l) => l.area_id === a.id)
-        .filter((l) => !term || l.titulo.toLowerCase().includes(term)),
-    }));
+    return homeQ.data.areas
+      .map((a) => ({
+        area: a,
+        lists: homeQ.data!.lists
+          .filter((l) => l.area_id === a.id)
+          .filter((l) => !term || l.titulo.toLowerCase().includes(term)),
+      }))
+      .filter(({ lists }) => lists.length > 0);
   }, [homeQ.data, q]);
+
 
   return (
     <div className="space-y-6">
