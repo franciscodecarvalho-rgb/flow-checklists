@@ -119,7 +119,7 @@ export const listHome = createServerFn({ method: "GET" })
         .order("nome", { ascending: true }),
       supa
         .from("lists")
-        .select("id, titulo, area_id, owner_id, created_at, updated_at, profiles:owner_id(full_name, email)")
+        .select("id, titulo, area_id, owner_id, created_at, updated_at")
         .order("titulo", { ascending: true }),
       supa.from("items").select("list_id, status"),
     ]);
@@ -142,15 +142,17 @@ export const listHome = createServerFn({ method: "GET" })
       owner_id: string;
       created_at: string;
       updated_at: string;
-      profiles: { full_name: string | null; email: string } | null;
     };
 
-    const lists = (listsRes.data as ListRow[]).map((l) => ({
+    const rows = listsRes.data as ListRow[];
+    const names = await resolveNames(supa, rows.map((l) => l.owner_id));
+
+    const lists = rows.map((l) => ({
       id: l.id,
       titulo: l.titulo,
       area_id: l.area_id,
       owner_id: l.owner_id,
-      owner_name: l.profiles?.full_name || l.profiles?.email || "—",
+      owner_name: names.get(l.owner_id) ?? "—",
       counts: counts.get(l.id) ?? { pending: 0, in_progress: 0, done: 0, total: 0 },
     }));
 
@@ -170,11 +172,13 @@ export const getListDetail = createServerFn({ method: "GET" })
     const supa = db(context);
     const { data: list, error } = await supa
       .from("lists")
-      .select("id, titulo, area_id, owner_id, created_at, updated_at, areas:area_id(nome), profiles:owner_id(full_name, email)")
+      .select("id, titulo, area_id, owner_id, created_at, updated_at, areas:area_id(nome)")
       .eq("id", data.id)
       .maybeSingle();
     if (error) throw new Error(error.message);
     if (!list) throw new Error("Lista não encontrada");
+
+    const names = await resolveNames(supa, [list.owner_id as string]);
 
     const { data: items, error: itemsErr } = await supa
       .from("items")
