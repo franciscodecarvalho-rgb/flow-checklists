@@ -1,0 +1,422 @@
+import { createServerFn } from "@tanstack/react-start";
+import { z } from "zod";
+import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
+
+// ============================================================
+// Types
+// ============================================================
+export type ItemStatus = "pending" | "in_progress" | "done";
+export type EventType = "status_change" | "comment" | "ticket_opened";
+
+// Helper to get an untyped client (types.ts is regenerated async).
+const db = (ctx: { supabase: unknown }) => ctx.supabase as any;
+
+// ============================================================
+// AREAS
+// ============================================================
+export const listAreas = createServerFn({ method: "GET" })
+  .middleware([requireSupabaseAuth])
+  .handler(async ({ context }) => {
+    const { data, error } = await db(context)
+      .from("areas")
+      .select("id, nome, ordem")
+      .order("ordem", { ascending: true })
+      .order("nome", { ascending: true });
+    if (error) throw new Error(error.message);
+    return data as { id: string; nome: string; ordem: number }[];
+  });
+
+export const createArea = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((input) =>
+    z.object({
+      nome: z.string().min(1).max(80),
+      ordem: z.number().int().min(0).max(100000).default(0),
+    }).parse(input),
+  )
+  .handler(async ({ data, context }) => {
+    const { data: row, error } = await db(context)
+      .from("areas")
+      .insert({ nome: data.nome, ordem: data.ordem })
+      .select("id, nome, ordem")
+      .single();
+    if (error) throw new Error(error.message);
+    return row;
+  });
+
+export const updateArea = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((input) =>
+    z.object({
+      id: z.string().uuid(),
+      nome: z.string().min(1).max(80).optional(),
+      ordem: z.number().int().min(0).max(100000).optional(),
+    }).parse(input),
+  )
+  .handler(async ({ data, context }) => {
+    const { id, ...patch } = data;
+    const { data: row, error } = await db(context)
+      .from("areas")
+      .update(patch)
+      .eq("id", id)
+      .select("id, nome, ordem")
+      .single();
+    if (error) throw new Error(error.message);
+    return row;
+  });
+
+export const deleteArea = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((input) => z.object({ id: z.string().uuid() }).parse(input))
+  .handler(async ({ data, context }) => {
+    const supa = db(context);
+    const { count, error: countErr } = await supa
+      .from("lists")
+      .select("id", { count: "exact", head: true })
+      .eq("area_id", data.id);
+    if (countErr) throw new Error(countErr.message);
+    if ((count ?? 0) > 0) {
+      throw new Error(
+        `Mova ou apague as ${count} listas vinculadas antes de excluir esta área`,
+      );
+    }
+    const { error } = await supa.from("areas").delete().eq("id", data.id);
+    if (error) throw new Error(error.message);
+    return { ok: true };
+  });
+
+// ============================================================
+// HOME — listas agrupadas por área com contagens de status
+// ============================================================
+export const listHome = createServerFn({ method: "GET" })
+  .middleware([requireSupabaseAuth])
+  .handler(async ({ context }) => {
+    const supa = db(context);
+    const [areasRes, listsRes, itemsRes] = await Promise.all([
+      supa
+        .from("areas")
+        .select("id, nome, ordem")
+        .order("nome", { ascending: true }),
+      supa
+        .from("lists")
+        .select("id, titulo, area_id, owner_id, created_at, updated_at, profiles:owner_id(full_name, email)")
+        .order("titulo", { ascending: true }),
+      supa.from("items").select("list_id, status"),
+    ]);
+    if (areasRes.error) throw new Error(areasRes.error.message);
+    if (listsRes.error) throw new Error(listsRes.error.message);
+    if (itemsRes.error) throw new Error(itemsRes.error.message);
+
+    const counts = new Map<string, { pending: number; in_progress: number; done: number; total: number }>();
+    for (const it of itemsRes.data as { list_id: string; status: ItemStatus }[]) {
+      const c = counts.get(it.list_id) ?? { pending: 0, in_progress: 0, done: 0, total: 0 };
+      c[it.status] += 1;
+      c.total += 1;
+      counts.set(it.list_id, c);
+    }
+
+    type ListRow = {
+      id: string;
+      titulo: string;
+      area_id: string;
+      owner_id: string;
+      created_at: string;
+      updated_at: string;
+      profiles: { full_name: string | null; email: string } | null;
+    };
+
+    const lists = (listsRes.data as ListRow[]).map((l) => ({
+      id: l.id,
+      titulo: l.titulo,
+      area_id: l.area_id,
+      owner_id: l.owner_id,
+      owner_name: l.profiles?.full_name || l.profiles?.email || "—",
+      counts: counts.get(l.id) ?? { pending: 0, in_progress: 0, done: 0, total: 0 },
+    }));
+
+    return {
+      areas: areasRes.data as { id: string; nome: string; ordem: number }[],
+      lists,
+    };
+  });
+
+// ============================================================
+// LIST DETAIL
+// ============================================================
+export const getListDetail = createServerFn({ method: "GET" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((input) => z.object({ id: z.string().uuid() }).parse(input))
+  .handler(async ({ data, context }) => {
+    const supa = db(context);
+    const { data: list, error } = await supa
+      .from("lists")
+      .select("id, titulo, area_id, owner_id, created_at, updated_at, areas:area_id(nome), profiles:owner_id(full_name, email)")
+      .eq("id", data.id)
+      .maybeSingle();
+    if (error) throw new Error(error.message);
+    if (!list) throw new Error("Lista não encontrada");
+
+    const { data: items, error: itemsErr } = await supa
+      .from("items")
+      .select("id, texto, status, ordem")
+      .eq("list_id", data.id)
+      .order("ordem", { ascending: true });
+    if (itemsErr) throw new Error(itemsErr.message);
+
+    return {
+      id: list.id as string,
+      titulo: list.titulo as string,
+      area_id: list.area_id as string,
+      area_nome: (list.areas?.nome as string) ?? "",
+      owner_id: list.owner_id as string,
+      owner_name: (list.profiles?.full_name as string) || (list.profiles?.email as string) || "—",
+      items: items as { id: string; texto: string; status: ItemStatus; ordem: number }[],
+    };
+  });
+
+// ============================================================
+// ITEM DETAIL + timeline
+// ============================================================
+export const getItemDetail = createServerFn({ method: "GET" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((input) => z.object({ id: z.string().uuid() }).parse(input))
+  .handler(async ({ data, context }) => {
+    const supa = db(context);
+    const { data: item, error } = await supa
+      .from("items")
+      .select("id, texto, status, ordem, list_id, lists:list_id(id, titulo, owner_id)")
+      .eq("id", data.id)
+      .maybeSingle();
+    if (error) throw new Error(error.message);
+    if (!item) throw new Error("Item não encontrado");
+
+    const { data: events, error: evErr } = await supa
+      .from("item_events")
+      .select("id, tipo, payload, created_at, author_id, profiles:author_id(full_name, email)")
+      .eq("item_id", data.id)
+      .order("created_at", { ascending: false });
+    if (evErr) throw new Error(evErr.message);
+
+    return {
+      id: item.id as string,
+      texto: item.texto as string,
+      status: item.status as ItemStatus,
+      list_id: item.list_id as string,
+      list_titulo: (item.lists?.titulo as string) ?? "",
+      list_owner_id: (item.lists?.owner_id as string) ?? "",
+      events: (events as any[]).map((e) => ({
+        id: e.id as string,
+        tipo: e.tipo as EventType,
+        payload: (e.payload ?? {}) as Record<string, string | number | null>,
+        created_at: e.created_at as string,
+        author_name:
+          (e.profiles?.full_name as string) || (e.profiles?.email as string) || "Sistema",
+      })),
+    };
+  });
+
+// ============================================================
+// USERS (admin only) — para transferência
+// ============================================================
+export const listUsers = createServerFn({ method: "GET" })
+  .middleware([requireSupabaseAuth])
+  .handler(async ({ context }) => {
+    const supa = db(context);
+    const { data: me, error: meErr } = await supa
+      .from("profiles")
+      .select("is_admin")
+      .eq("id", context.userId)
+      .maybeSingle();
+    if (meErr) throw new Error(meErr.message);
+    if (!me?.is_admin) throw new Error("Apenas administradores");
+
+    const { data, error } = await supa
+      .from("profiles")
+      .select("id, full_name, email, is_admin")
+      .order("full_name", { ascending: true });
+    if (error) throw new Error(error.message);
+    return data as { id: string; full_name: string | null; email: string; is_admin: boolean }[];
+  });
+
+// ============================================================
+// LIST MUTATIONS
+// ============================================================
+export const createList = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((input) =>
+    z.object({
+      titulo: z.string().min(1).max(200),
+      area_id: z.string().uuid(),
+    }).parse(input),
+  )
+  .handler(async ({ data, context }) => {
+    const { data: row, error } = await db(context)
+      .from("lists")
+      .insert({ titulo: data.titulo, area_id: data.area_id, owner_id: context.userId })
+      .select("id")
+      .single();
+    if (error) throw new Error(error.message);
+    return row as { id: string };
+  });
+
+export const updateListTitle = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((input) =>
+    z.object({
+      id: z.string().uuid(),
+      titulo: z.string().min(1).max(200).optional(),
+      area_id: z.string().uuid().optional(),
+    }).parse(input),
+  )
+  .handler(async ({ data, context }) => {
+    const { id, ...patch } = data;
+    const { error } = await db(context).from("lists").update(patch).eq("id", id);
+    if (error) throw new Error(error.message);
+    return { ok: true };
+  });
+
+export const deleteList = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((input) => z.object({ id: z.string().uuid() }).parse(input))
+  .handler(async ({ data, context }) => {
+    const { error } = await db(context).from("lists").delete().eq("id", data.id);
+    if (error) throw new Error(error.message);
+    return { ok: true };
+  });
+
+export const transferList = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((input) =>
+    z.object({
+      id: z.string().uuid(),
+      new_owner_id: z.string().uuid(),
+    }).parse(input),
+  )
+  .handler(async ({ data, context }) => {
+    const { error } = await db(context)
+      .from("lists")
+      .update({ owner_id: data.new_owner_id })
+      .eq("id", data.id);
+    if (error) throw new Error(error.message);
+    return { ok: true };
+  });
+
+// ============================================================
+// ITEM MUTATIONS
+// ============================================================
+export const createItem = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((input) =>
+    z.object({
+      list_id: z.string().uuid(),
+      texto: z.string().min(1).max(500),
+    }).parse(input),
+  )
+  .handler(async ({ data, context }) => {
+    const supa = db(context);
+    const { data: last } = await supa
+      .from("items")
+      .select("ordem")
+      .eq("list_id", data.list_id)
+      .order("ordem", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    const nextOrdem = ((last?.ordem as number | undefined) ?? 0) + 10;
+
+    const { data: row, error } = await supa
+      .from("items")
+      .insert({ list_id: data.list_id, texto: data.texto, ordem: nextOrdem, status: "pending" })
+      .select("id")
+      .single();
+    if (error) throw new Error(error.message);
+    return row as { id: string };
+  });
+
+export const updateItemText = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((input) =>
+    z.object({
+      id: z.string().uuid(),
+      texto: z.string().min(1).max(500),
+    }).parse(input),
+  )
+  .handler(async ({ data, context }) => {
+    const { error } = await db(context)
+      .from("items")
+      .update({ texto: data.texto })
+      .eq("id", data.id);
+    if (error) throw new Error(error.message);
+    return { ok: true };
+  });
+
+export const updateItemStatus = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((input) =>
+    z.object({
+      id: z.string().uuid(),
+      status: z.enum(["pending", "in_progress", "done"]),
+    }).parse(input),
+  )
+  .handler(async ({ data, context }) => {
+    const { error } = await db(context)
+      .from("items")
+      .update({ status: data.status })
+      .eq("id", data.id);
+    if (error) throw new Error(error.message);
+    return { ok: true };
+  });
+
+export const deleteItem = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((input) => z.object({ id: z.string().uuid() }).parse(input))
+  .handler(async ({ data, context }) => {
+    const { error } = await db(context).from("items").delete().eq("id", data.id);
+    if (error) throw new Error(error.message);
+    return { ok: true };
+  });
+
+// Reordena items: aplica novas ordens; se gap mínimo < 2, normaliza (10,20,30...).
+export const reorderItems = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((input) =>
+    z.object({
+      list_id: z.string().uuid(),
+      ordered_ids: z.array(z.string().uuid()).min(1).max(500),
+    }).parse(input),
+  )
+  .handler(async ({ data, context }) => {
+    const supa = db(context);
+    // Sempre normaliza (passo 10) — simples e robusto.
+    const updates = data.ordered_ids.map((id, idx) => ({ id, ordem: (idx + 1) * 10 }));
+    // Atualiza em paralelo
+    const results = await Promise.all(
+      updates.map((u) =>
+        supa.from("items").update({ ordem: u.ordem }).eq("id", u.id).eq("list_id", data.list_id),
+      ),
+    );
+    const firstErr = results.find((r) => r.error);
+    if (firstErr?.error) throw new Error(firstErr.error.message);
+    return { ok: true };
+  });
+
+// ============================================================
+// COMMENTS
+// ============================================================
+export const addComment = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((input) =>
+    z.object({
+      item_id: z.string().uuid(),
+      texto: z.string().min(1).max(2000),
+    }).parse(input),
+  )
+  .handler(async ({ data, context }) => {
+    const { error } = await db(context).from("item_events").insert({
+      item_id: data.item_id,
+      tipo: "comment",
+      payload: { texto: data.texto },
+      author_id: context.userId,
+    });
+    if (error) throw new Error(error.message);
+    return { ok: true };
+  });
