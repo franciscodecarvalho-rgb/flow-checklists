@@ -50,7 +50,7 @@ async function resolveNames(
     .from("profiles_public")
     .select("id, full_name")
     .in("id", unique);
-  if (error) throw new Error(error.message);
+  if (error) throw safeDbError(error);
   const map = new Map<string, string>();
   for (const r of data as { id: string; full_name: string | null }[]) {
     map.set(r.id, r.full_name || "—");
@@ -69,7 +69,7 @@ export const listAreas = createServerFn({ method: "GET" })
       .select("id, nome, ordem")
       .order("ordem", { ascending: true })
       .order("nome", { ascending: true });
-    if (error) throw new Error(error.message);
+    if (error) throw safeDbError(error);
     return data as { id: string; nome: string; ordem: number }[];
   });
 
@@ -87,7 +87,7 @@ export const createArea = createServerFn({ method: "POST" })
       .insert({ nome: data.nome, ordem: data.ordem })
       .select("id, nome, ordem")
       .single();
-    if (error) throw new Error(error.message);
+    if (error) throw safeDbError(error);
     return row;
   });
 
@@ -108,7 +108,7 @@ export const updateArea = createServerFn({ method: "POST" })
       .eq("id", id)
       .select("id, nome, ordem")
       .single();
-    if (error) throw new Error(error.message);
+    if (error) throw safeDbError(error);
     return row;
   });
 
@@ -121,14 +121,14 @@ export const deleteArea = createServerFn({ method: "POST" })
       .from("lists")
       .select("id", { count: "exact", head: true })
       .eq("area_id", data.id);
-    if (countErr) throw new Error(countErr.message);
+    if (countErr) throw safeDbError(countErr);
     if ((count ?? 0) > 0) {
       throw new Error(
         `Mova ou apague as ${count} listas vinculadas antes de excluir esta área`,
       );
     }
     const { error } = await supa.from("areas").delete().eq("id", data.id);
-    if (error) throw new Error(error.message);
+    if (error) throw safeDbError(error);
     return { ok: true };
   });
 
@@ -150,9 +150,9 @@ export const listHome = createServerFn({ method: "GET" })
         .order("titulo", { ascending: true }),
       supa.from("items").select("list_id, status"),
     ]);
-    if (areasRes.error) throw new Error(areasRes.error.message);
-    if (listsRes.error) throw new Error(listsRes.error.message);
-    if (itemsRes.error) throw new Error(itemsRes.error.message);
+    if (areasRes.error) throw safeDbError(areasRes.error);
+    if (listsRes.error) throw safeDbError(listsRes.error);
+    if (itemsRes.error) throw safeDbError(itemsRes.error);
 
     const counts = new Map<string, { pending: number; in_progress: number; done: number; total: number }>();
     for (const it of itemsRes.data as { list_id: string; status: ItemStatus }[]) {
@@ -202,7 +202,7 @@ export const getListDetail = createServerFn({ method: "GET" })
       .select("id, titulo, area_id, owner_id, created_at, updated_at, areas:area_id(nome)")
       .eq("id", data.id)
       .maybeSingle();
-    if (error) throw new Error(error.message);
+    if (error) throw safeDbError(error);
     if (!list) throw new Error("Lista não encontrada");
 
     const names = await resolveNames(supa, [list.owner_id as string]);
@@ -212,7 +212,7 @@ export const getListDetail = createServerFn({ method: "GET" })
       .select("id, texto, status, ordem")
       .eq("list_id", data.id)
       .order("ordem", { ascending: true });
-    if (itemsErr) throw new Error(itemsErr.message);
+    if (itemsErr) throw safeDbError(itemsErr);
 
     return {
       id: list.id as string,
@@ -238,7 +238,7 @@ export const getItemDetail = createServerFn({ method: "GET" })
       .select("id, texto, status, ordem, list_id, lists:list_id(id, titulo, owner_id)")
       .eq("id", data.id)
       .maybeSingle();
-    if (error) throw new Error(error.message);
+    if (error) throw safeDbError(error);
     if (!item) throw new Error("Item não encontrado");
 
     const { data: events, error: evErr } = await supa
@@ -246,7 +246,7 @@ export const getItemDetail = createServerFn({ method: "GET" })
       .select("id, tipo, payload, created_at, author_id")
       .eq("item_id", data.id)
       .order("created_at", { ascending: false });
-    if (evErr) throw new Error(evErr.message);
+    if (evErr) throw safeDbError(evErr);
 
     const evRows = (events ?? []) as {
       id: string;
@@ -286,14 +286,14 @@ export const listUsers = createServerFn({ method: "GET" })
       .select("is_admin")
       .eq("id", context.userId)
       .maybeSingle();
-    if (meErr) throw new Error(meErr.message);
+    if (meErr) throw safeDbError(meErr);
     if (!me?.is_admin) throw new Error("Apenas administradores");
 
     const { data, error } = await supa
       .from("profiles")
       .select("id, full_name, email, is_admin")
       .order("full_name", { ascending: true });
-    if (error) throw new Error(error.message);
+    if (error) throw safeDbError(error);
     return data as { id: string; full_name: string | null; email: string; is_admin: boolean }[];
   });
 
@@ -314,7 +314,7 @@ export const createList = createServerFn({ method: "POST" })
       .insert({ titulo: data.titulo, area_id: data.area_id, owner_id: context.userId })
       .select("id")
       .single();
-    if (error) throw new Error(error.message);
+    if (error) throw safeDbError(error);
     return row as { id: string };
   });
 
@@ -330,7 +330,7 @@ export const updateListTitle = createServerFn({ method: "POST" })
   .handler(async ({ data, context }) => {
     const { id, ...patch } = data;
     const { error } = await db(context).from("lists").update(patch).eq("id", id);
-    if (error) throw new Error(error.message);
+    if (error) throw safeDbError(error);
     return { ok: true };
   });
 
@@ -339,7 +339,7 @@ export const deleteList = createServerFn({ method: "POST" })
   .inputValidator((input) => z.object({ id: z.string().uuid() }).parse(input))
   .handler(async ({ data, context }) => {
     const { error } = await db(context).from("lists").delete().eq("id", data.id);
-    if (error) throw new Error(error.message);
+    if (error) throw safeDbError(error);
     return { ok: true };
   });
 
@@ -356,7 +356,7 @@ export const transferList = createServerFn({ method: "POST" })
       .from("lists")
       .update({ owner_id: data.new_owner_id })
       .eq("id", data.id);
-    if (error) throw new Error(error.message);
+    if (error) throw safeDbError(error);
     return { ok: true };
   });
 
@@ -387,7 +387,7 @@ export const createItem = createServerFn({ method: "POST" })
       .insert({ list_id: data.list_id, texto: data.texto, ordem: nextOrdem, status: "pending" })
       .select("id")
       .single();
-    if (error) throw new Error(error.message);
+    if (error) throw safeDbError(error);
     return row as { id: string };
   });
 
@@ -404,7 +404,7 @@ export const updateItemText = createServerFn({ method: "POST" })
       .from("items")
       .update({ texto: data.texto })
       .eq("id", data.id);
-    if (error) throw new Error(error.message);
+    if (error) throw safeDbError(error);
     return { ok: true };
   });
 
@@ -421,7 +421,7 @@ export const updateItemStatus = createServerFn({ method: "POST" })
       _item_id: data.id,
       _status: data.status,
     });
-    if (error) throw new Error(error.message);
+    if (error) throw safeDbError(error);
     return { ok: true };
   });
 
@@ -430,7 +430,7 @@ export const deleteItem = createServerFn({ method: "POST" })
   .inputValidator((input) => z.object({ id: z.string().uuid() }).parse(input))
   .handler(async ({ data, context }) => {
     const { error } = await db(context).from("items").delete().eq("id", data.id);
-    if (error) throw new Error(error.message);
+    if (error) throw safeDbError(error);
     return { ok: true };
   });
 
@@ -454,7 +454,7 @@ export const reorderItems = createServerFn({ method: "POST" })
       ),
     );
     const firstErr = results.find((r) => r.error);
-    if (firstErr?.error) throw new Error(firstErr.error.message);
+    if (firstErr?.error) throw safeDbError(firstErr.error);
     return { ok: true };
   });
 
@@ -476,6 +476,6 @@ export const addComment = createServerFn({ method: "POST" })
       payload: { texto: data.texto },
       author_id: context.userId,
     });
-    if (error) throw new Error(error.message);
+    if (error) throw safeDbError(error);
     return { ok: true };
   });
