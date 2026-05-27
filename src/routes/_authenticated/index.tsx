@@ -35,6 +35,23 @@ export const Route = createFileRoute("/_authenticated/")({
   component: HomePage,
 });
 
+// Faixa de cores por dias até a próxima checagem.
+function daysUntil(dateStr: string | null | undefined): number {
+  if (!dateStr) return Number.POSITIVE_INFINITY;
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const d = new Date(dateStr + "T00:00:00");
+  return Math.round((d.getTime() - today.getTime()) / 86400000);
+}
+
+function bucketClass(days: number): string {
+  if (days < 2) return "border-red-500/50 bg-red-500/10 text-red-700 dark:text-red-300";
+  if (days <= 7) return "border-orange-500/50 bg-orange-500/10 text-orange-700 dark:text-orange-300";
+  if (days <= 15) return "border-yellow-500/60 bg-yellow-500/15 text-yellow-800 dark:text-yellow-300";
+  if (days <= 21) return "border-yellow-400/40 bg-yellow-400/10 text-yellow-700 dark:text-yellow-200";
+  return "border-emerald-500/40 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300";
+}
+
 function HomePage() {
   const { profile, user } = useAuth();
   const home = useServerFn(listHome);
@@ -58,7 +75,6 @@ function HomePage() {
       }))
       .filter(({ lists }) => lists.length > 0);
   }, [homeQ.data, q]);
-
 
   return (
     <div className="space-y-6">
@@ -113,39 +129,42 @@ function HomePage() {
           <section key={area.id} className="space-y-3">
             <h2 className="text-lg font-semibold">{area.nome}</h2>
             <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-              {lists.map((l) => (
-                <Link key={l.id} to="/listas/$id" params={{ id: l.id }} className="block">
-                  <Card className="h-full transition hover:border-primary/50 hover:shadow-md">
-                    <CardHeader className="pb-2">
-                      <CardTitle className="text-base">{l.titulo}</CardTitle>
-                      <p className="text-xs text-muted-foreground">por {l.owner_name}</p>
-                    </CardHeader>
-                    <CardContent className="flex flex-wrap gap-2 text-xs">
-                      <Badge variant="secondary">{l.counts.total} itens</Badge>
-                      {l.counts.pending > 0 && (
-                        <Badge variant="outline" className="border-amber-500/40 text-amber-700 dark:text-amber-300">
-                          {l.counts.pending} pend.
-                        </Badge>
-                      )}
-                      {l.counts.in_progress > 0 && (
-                        <Badge variant="outline" className="border-blue-500/40 text-blue-700 dark:text-blue-300">
-                          {l.counts.in_progress} em and.
-                        </Badge>
-                      )}
-                      {l.counts.done > 0 && (
-                        <Badge variant="outline" className="border-emerald-500/40 text-emerald-700 dark:text-emerald-300">
-                          {l.counts.done} ok
-                        </Badge>
-                      )}
-                    </CardContent>
-                  </Card>
-                </Link>
-              ))}
+              {lists.map((l) => {
+                const sorted = [...l.items].sort(
+                  (a, b) => daysUntil(a.proxima_checagem) - daysUntil(b.proxima_checagem),
+                );
+                const next = sorted[0];
+                const nextDays = next ? daysUntil(next.proxima_checagem) : Number.POSITIVE_INFINITY;
+                return (
+                  <Link key={l.id} to="/listas/$id" params={{ id: l.id }} className="block">
+                    <Card className="h-full transition hover:border-primary/50 hover:shadow-md">
+                      <CardHeader className="pb-2">
+                        <CardTitle className="text-base">{l.titulo}</CardTitle>
+                        <p className="text-xs text-muted-foreground">por {l.owner_name}</p>
+                      </CardHeader>
+                      <CardContent className="flex flex-wrap gap-2 text-xs">
+                        <Badge variant="secondary">{l.items.length} itens</Badge>
+                        {next ? (
+                          <Badge variant="outline" className={bucketClass(nextDays)}>
+                            próx.{" "}
+                            {nextDays < 0
+                              ? `há ${Math.abs(nextDays)}d`
+                              : nextDays === 0
+                                ? "hoje"
+                                : `em ${nextDays}d`}
+                          </Badge>
+                        ) : (
+                          <Badge variant="outline">sem itens ativos</Badge>
+                        )}
+                      </CardContent>
+                    </Card>
+                  </Link>
+                );
+              })}
             </div>
           </section>
         ))}
       </div>
-
     </div>
   );
 }
