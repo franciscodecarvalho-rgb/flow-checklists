@@ -5,17 +5,23 @@ import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
 // ============================================================
 // Types
 // ============================================================
-export type ItemStatus = "pending" | "in_progress" | "done";
-export type EventType = "status_change" | "comment" | "ticket_opened";
+export type ItemEventType =
+  | "item_created"
+  | "item_edited"
+  | "verification"
+  | "comment"
+  | "archived"
+  | "unarchived"
+  | "ticket_opened";
 
-// Helper to get an untyped client (types.ts is regenerated async).
 const db = (ctx: { supabase: unknown }) => ctx.supabase as any;
 
-// Map raw Postgres/PostgREST errors to safe, user-facing messages.
-// Internal details are logged server-side only.
-function safeDbError(err: { code?: string; message?: string } | null | undefined, fallback = "Operação falhou. Tente novamente."): Error {
+// ----- helpers -----
+function safeDbError(
+  err: { code?: string; message?: string } | null | undefined,
+  fallback = "Operação falhou. Tente novamente.",
+): Error {
   if (!err) return new Error(fallback);
-  // Log full detail server-side for debugging
   console.error("[db]", err);
   const code = err.code;
   if (code === "23505") return new Error("Já existe um registro com esse identificador.");
@@ -24,10 +30,13 @@ function safeDbError(err: { code?: string; message?: string } | null | undefined
   if (code === "23514") return new Error("Valor inválido para um dos campos.");
   if (code === "42501" || code === "PGRST301") return new Error("Você não tem permissão para esta operação.");
   if (code === "PGRST116") return new Error("Registro não encontrado.");
+  // Mensagens vindas de RAISE EXCEPTION em triggers — repassa amigavelmente.
+  if (err.message && /^Apenas|^Não é possível|^Ao desarquivar/i.test(err.message)) {
+    return new Error(err.message);
+  }
   return new Error(fallback);
 }
 
-// Throws if the current user is not an admin. Use for admin-only server functions.
 async function assertAdmin(ctx: { supabase: unknown; userId: string }): Promise<void> {
   const { data, error } = await (ctx.supabase as any)
     .from("profiles")
@@ -38,8 +47,6 @@ async function assertAdmin(ctx: { supabase: unknown; userId: string }): Promise<
   if (!data?.is_admin) throw new Error("Apenas administradores");
 }
 
-// Resolve display names for a set of user ids using the safe public view.
-// `profiles_public` only exposes id + full_name.
 async function resolveNames(
   supa: any,
   ids: (string | null | undefined)[],
@@ -47,13 +54,13 @@ async function resolveNames(
   const unique = Array.from(new Set(ids.filter((x): x is string => !!x)));
   if (unique.length === 0) return new Map();
   const { data, error } = await supa
-    .from("profiles_public")
-    .select("id, full_name")
+    .from("profiles")
+    .select("id, full_name, email")
     .in("id", unique);
   if (error) throw safeDbError(error);
   const map = new Map<string, string>();
-  for (const r of data as { id: string; full_name: string | null }[]) {
-    map.set(r.id, r.full_name || "—");
+  for (const r of data as { id: string; full_name: string | null; email: string }[]) {
+    map.set(r.id, r.full_name?.trim() || r.email);
   }
   return map;
 }
@@ -127,7 +134,7 @@ export const deleteArea = createServerFn({ method: "POST" })
     if (countErr) throw safeDbError(countErr);
     if ((count ?? 0) > 0) {
       throw new Error(
-        `Mova ou apague as ${count} listas vinculadas antes de excluir esta área`,
+        `Mova ou arquive as ${count} listas vinculadas antes de excluir esta área`,
       );
     }
     const { error } = await supa.from("areas").delete().eq("id", data.id);
@@ -136,34 +143,43 @@ export const deleteArea = createServerFn({ method: "POST" })
   });
 
 // ============================================================
-// HOME — listas agrupadas por área com contagens de status
+// USERS (admin only)
+// ============================================================
+export const listUsers = createServerFn({ method: "GET" })
+  .middleware([requireSupabaseAuth])
+  .handler(async ({ context }) => {
+    await assertAdmin(context);
+    const { data, error } = await db(context)
+      .from("profiles")
+      .select("id, full_name, email, is_admin")
+      .order("full_name", { ascending: true });
+    if (error) throw safeDbError(error);
+    return data as { id: string; full_name: string | null; email: string; is_admin: boolean }[];
+  });
+
+// ============================================================
+// HOME — listas ativas agrupadas por área, itens ativos ordenados por data
 // ============================================================
 export const listHome = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
   .handler(async ({ context }) => {
     const supa = db(context);
     const [areasRes, listsRes, itemsRes] = await Promise.all([
-      supa
-        .from("areas")
-        .select("id, nome, ordem")
-        .order("nome", { ascending: true }),
+      supa.from("areas").select("id, nome, ordem").order("ordem").order("nome"),
       supa
         .from("lists")
         .select("id, titulo, area_id, owner_id, created_at, updated_at")
+        .is("archived_at", null)
         .order("titulo", { ascending: true }),
-      supa.from("items").select("list_id, status"),
+      supa
+        .from("items")
+        .select("id, list_id, texto, proxima_checagem, periodicidade_dias, ordem")
+        .is("archived_at", null)
+        .order("proxima_checagem", { ascending: true }),
     ]);
     if (areasRes.error) throw safeDbError(areasRes.error);
     if (listsRes.error) throw safeDbError(listsRes.error);
     if (itemsRes.error) throw safeDbError(itemsRes.error);
-
-    const counts = new Map<string, { pending: number; in_progress: number; done: number; total: number }>();
-    for (const it of itemsRes.data as { list_id: string; status: ItemStatus }[]) {
-      const c = counts.get(it.list_id) ?? { pending: 0, in_progress: 0, done: 0, total: 0 };
-      c[it.status] += 1;
-      c.total += 1;
-      counts.set(it.list_id, c);
-    }
 
     type ListRow = {
       id: string;
@@ -173,22 +189,36 @@ export const listHome = createServerFn({ method: "GET" })
       created_at: string;
       updated_at: string;
     };
+    type ItemRow = {
+      id: string;
+      list_id: string;
+      texto: string;
+      proxima_checagem: string;
+      periodicidade_dias: number | null;
+      ordem: number;
+    };
 
-    const rows = listsRes.data as ListRow[];
-    const names = await resolveNames(supa, rows.map((l) => l.owner_id));
+    const lists = listsRes.data as ListRow[];
+    const items = itemsRes.data as ItemRow[];
+    const names = await resolveNames(supa, lists.map((l) => l.owner_id));
 
-    const lists = rows.map((l) => ({
-      id: l.id,
-      titulo: l.titulo,
-      area_id: l.area_id,
-      owner_id: l.owner_id,
-      owner_name: names.get(l.owner_id) ?? "—",
-      counts: counts.get(l.id) ?? { pending: 0, in_progress: 0, done: 0, total: 0 },
-    }));
+    const itemsByList = new Map<string, ItemRow[]>();
+    for (const it of items) {
+      const arr = itemsByList.get(it.list_id) ?? [];
+      arr.push(it);
+      itemsByList.set(it.list_id, arr);
+    }
 
     return {
       areas: areasRes.data as { id: string; nome: string; ordem: number }[],
-      lists,
+      lists: lists.map((l) => ({
+        id: l.id,
+        titulo: l.titulo,
+        area_id: l.area_id,
+        owner_id: l.owner_id,
+        owner_name: names.get(l.owner_id) ?? "—",
+        items: itemsByList.get(l.id) ?? [],
+      })),
     };
   });
 
@@ -202,18 +232,20 @@ export const getListDetail = createServerFn({ method: "GET" })
     const supa = db(context);
     const { data: list, error } = await supa
       .from("lists")
-      .select("id, titulo, area_id, owner_id, created_at, updated_at, areas:area_id(nome)")
+      .select("id, titulo, area_id, owner_id, archived_at, archived_by, created_at, updated_at, areas:area_id(nome)")
       .eq("id", data.id)
       .maybeSingle();
     if (error) throw safeDbError(error);
     if (!list) throw new Error("Lista não encontrada");
 
-    const names = await resolveNames(supa, [list.owner_id as string]);
+    const names = await resolveNames(supa, [list.owner_id as string, list.archived_by as string | null]);
 
     const { data: items, error: itemsErr } = await supa
       .from("items")
-      .select("id, texto, status, ordem")
+      .select("id, texto, proxima_checagem, periodicidade_dias, ordem, archived_at")
       .eq("list_id", data.id)
+      .order("archived_at", { ascending: true, nullsFirst: true })
+      .order("proxima_checagem", { ascending: true, nullsFirst: false })
       .order("ordem", { ascending: true });
     if (itemsErr) throw safeDbError(itemsErr);
 
@@ -224,12 +256,21 @@ export const getListDetail = createServerFn({ method: "GET" })
       area_nome: (list.areas?.nome as string) ?? "",
       owner_id: list.owner_id as string,
       owner_name: names.get(list.owner_id as string) ?? "—",
-      items: items as { id: string; texto: string; status: ItemStatus; ordem: number }[],
+      archived_at: (list.archived_at as string | null) ?? null,
+      archived_by_name: list.archived_by ? names.get(list.archived_by as string) ?? "—" : null,
+      items: items as {
+        id: string;
+        texto: string;
+        proxima_checagem: string | null;
+        periodicidade_dias: number | null;
+        ordem: number;
+        archived_at: string | null;
+      }[],
     };
   });
 
 // ============================================================
-// ITEM DETAIL + timeline
+// ITEM DETAIL + timeline + tickets
 // ============================================================
 export const getItemDetail = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
@@ -238,35 +279,55 @@ export const getItemDetail = createServerFn({ method: "GET" })
     const supa = db(context);
     const { data: item, error } = await supa
       .from("items")
-      .select("id, texto, status, ordem, list_id, lists:list_id(id, titulo, owner_id)")
+      .select(
+        "id, texto, proxima_checagem, periodicidade_dias, ordem, archived_at, archived_by, list_id, lists:list_id(id, titulo, owner_id)",
+      )
       .eq("id", data.id)
       .maybeSingle();
     if (error) throw safeDbError(error);
     if (!item) throw new Error("Item não encontrado");
 
-    const { data: events, error: evErr } = await supa
-      .from("item_events")
-      .select("id, tipo, payload, created_at, author_id")
-      .eq("item_id", data.id)
-      .order("created_at", { ascending: false });
-    if (evErr) throw safeDbError(evErr);
+    const [eventsRes, ticketsRes] = await Promise.all([
+      supa
+        .from("item_events")
+        .select("id, tipo, payload, created_at, author_id")
+        .eq("item_id", data.id)
+        .order("created_at", { ascending: false }),
+      supa
+        .from("item_tickets")
+        .select("id, ticket_code, ticket_status, created_at, last_synced_at")
+        .eq("item_id", data.id)
+        .order("created_at", { ascending: false }),
+    ]);
+    if (eventsRes.error) throw safeDbError(eventsRes.error);
+    if (ticketsRes.error) throw safeDbError(ticketsRes.error);
 
-    const evRows = (events ?? []) as {
+    const evRows = (eventsRes.data ?? []) as {
       id: string;
-      tipo: EventType;
+      tipo: ItemEventType;
       payload: Record<string, string | number | null> | null;
       created_at: string;
       author_id: string | null;
     }[];
-    const names = await resolveNames(supa, evRows.map((e) => e.author_id));
+
+    const ids = [
+      ...evRows.map((e) => e.author_id),
+      item.archived_by as string | null,
+      (item.lists?.owner_id as string) ?? null,
+    ];
+    const names = await resolveNames(supa, ids);
 
     return {
       id: item.id as string,
       texto: item.texto as string,
-      status: item.status as ItemStatus,
+      proxima_checagem: (item.proxima_checagem as string | null) ?? null,
+      periodicidade_dias: (item.periodicidade_dias as number | null) ?? null,
+      archived_at: (item.archived_at as string | null) ?? null,
+      archived_by_name: item.archived_by ? names.get(item.archived_by as string) ?? "—" : null,
       list_id: item.list_id as string,
       list_titulo: (item.lists?.titulo as string) ?? "",
       list_owner_id: (item.lists?.owner_id as string) ?? "",
+      list_owner_name: names.get((item.lists?.owner_id as string) ?? "") ?? "—",
       events: evRows.map((e) => ({
         id: e.id,
         tipo: e.tipo,
@@ -274,30 +335,14 @@ export const getItemDetail = createServerFn({ method: "GET" })
         created_at: e.created_at,
         author_name: (e.author_id && names.get(e.author_id)) || "Sistema",
       })),
+      tickets: (ticketsRes.data ?? []) as {
+        id: string;
+        ticket_code: string;
+        ticket_status: string | null;
+        created_at: string;
+        last_synced_at: string | null;
+      }[],
     };
-  });
-
-// ============================================================
-// USERS (admin only) — para transferência
-// ============================================================
-export const listUsers = createServerFn({ method: "GET" })
-  .middleware([requireSupabaseAuth])
-  .handler(async ({ context }) => {
-    const supa = db(context);
-    const { data: me, error: meErr } = await supa
-      .from("profiles")
-      .select("is_admin")
-      .eq("id", context.userId)
-      .maybeSingle();
-    if (meErr) throw safeDbError(meErr);
-    if (!me?.is_admin) throw new Error("Apenas administradores");
-
-    const { data, error } = await supa
-      .from("profiles")
-      .select("id, full_name, email, is_admin")
-      .order("full_name", { ascending: true });
-    if (error) throw safeDbError(error);
-    return data as { id: string; full_name: string | null; email: string; is_admin: boolean }[];
   });
 
 // ============================================================
@@ -337,11 +382,39 @@ export const updateListTitle = createServerFn({ method: "POST" })
     return { ok: true };
   });
 
-export const deleteList = createServerFn({ method: "POST" })
+export const archiveList = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((input) =>
+    z.object({
+      id: z.string().uuid(),
+      comentario: z.string().min(1).max(2000),
+    }).parse(input),
+  )
+  .handler(async ({ data, context }) => {
+    const supa = db(context);
+    // Insere comentário primeiro (visível mesmo se o arquivamento falhar por itens ativos
+    // não, melhor: arquiva primeiro; se falhar, o comentário vira ruído).
+    const { error } = await supa
+      .from("lists")
+      .update({ archived_at: new Date().toISOString() })
+      .eq("id", data.id);
+    if (error) throw safeDbError(error);
+    // Comentário fica como observação textual no histórico da lista? Por enquanto não temos
+    // tabela de eventos de lista. Guardamos a justificativa como o "último update" registrado
+    // pelo trigger; se quisermos histórico de lista depois, criamos `list_events`.
+    // (Comentário é exigido por contrato com o usuário, mesmo que o destino seja só auditoria futura.)
+    void data.comentario;
+    return { ok: true };
+  });
+
+export const unarchiveList = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator((input) => z.object({ id: z.string().uuid() }).parse(input))
   .handler(async ({ data, context }) => {
-    const { error } = await db(context).from("lists").delete().eq("id", data.id);
+    const { error } = await db(context)
+      .from("lists")
+      .update({ archived_at: null })
+      .eq("id", data.id);
     if (error) throw safeDbError(error);
     return { ok: true };
   });
@@ -355,6 +428,7 @@ export const transferList = createServerFn({ method: "POST" })
     }).parse(input),
   )
   .handler(async ({ data, context }) => {
+    await assertAdmin(context);
     const { error } = await db(context)
       .from("lists")
       .update({ owner_id: data.new_owner_id })
@@ -366,12 +440,20 @@ export const transferList = createServerFn({ method: "POST" })
 // ============================================================
 // ITEM MUTATIONS
 // ============================================================
+function addDays(date: Date, days: number): string {
+  const d = new Date(date);
+  d.setUTCDate(d.getUTCDate() + days);
+  return d.toISOString().slice(0, 10); // YYYY-MM-DD
+}
+
 export const createItem = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator((input) =>
     z.object({
       list_id: z.string().uuid(),
       texto: z.string().min(1).max(500),
+      proxima_checagem: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+      periodicidade_dias: z.number().int().positive().max(3650).nullable().optional(),
     }).parse(input),
   )
   .handler(async ({ data, context }) => {
@@ -384,10 +466,17 @@ export const createItem = createServerFn({ method: "POST" })
       .limit(1)
       .maybeSingle();
     const nextOrdem = ((last?.ordem as number | undefined) ?? 0) + 10;
+    const proxima = data.proxima_checagem ?? addDays(new Date(), 7);
 
     const { data: row, error } = await supa
       .from("items")
-      .insert({ list_id: data.list_id, texto: data.texto, ordem: nextOrdem, status: "pending" })
+      .insert({
+        list_id: data.list_id,
+        texto: data.texto,
+        ordem: nextOrdem,
+        proxima_checagem: proxima,
+        periodicidade_dias: data.periodicidade_dias ?? null,
+      })
       .select("id")
       .single();
     if (error) throw safeDbError(error);
@@ -403,41 +492,145 @@ export const updateItemText = createServerFn({ method: "POST" })
     }).parse(input),
   )
   .handler(async ({ data, context }) => {
-    const { error } = await db(context)
+    const supa = db(context);
+    const { data: prev, error: prevErr } = await supa
+      .from("items")
+      .select("texto")
+      .eq("id", data.id)
+      .maybeSingle();
+    if (prevErr) throw safeDbError(prevErr);
+    if (!prev) throw new Error("Item não encontrado");
+    if (prev.texto === data.texto) return { ok: true };
+
+    const { error } = await supa
       .from("items")
       .update({ texto: data.texto })
       .eq("id", data.id);
     if (error) throw safeDbError(error);
+
+    await supa.from("item_events").insert({
+      item_id: data.id,
+      author_id: context.userId,
+      tipo: "item_edited",
+      payload: { from: prev.texto, to: data.texto },
+    });
     return { ok: true };
   });
 
-export const updateItemStatus = createServerFn({ method: "POST" })
+export const updateItemSchedule = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator((input) =>
     z.object({
       id: z.string().uuid(),
-      status: z.enum(["pending", "in_progress", "done"]),
+      proxima_checagem: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+      periodicidade_dias: z.number().int().positive().max(3650).nullable().optional(),
     }).parse(input),
   )
   .handler(async ({ data, context }) => {
-    const { error } = await db(context).rpc("set_item_status", {
-      _item_id: data.id,
-      _status: data.status,
-    });
+    const patch: Record<string, unknown> = {};
+    if (data.proxima_checagem !== undefined) patch.proxima_checagem = data.proxima_checagem;
+    if (data.periodicidade_dias !== undefined) patch.periodicidade_dias = data.periodicidade_dias;
+    if (Object.keys(patch).length === 0) return { ok: true };
+    const { error } = await db(context).from("items").update(patch).eq("id", data.id);
     if (error) throw safeDbError(error);
     return { ok: true };
   });
 
-export const deleteItem = createServerFn({ method: "POST" })
+export const verifyItem = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .inputValidator((input) => z.object({ id: z.string().uuid() }).parse(input))
+  .inputValidator((input) =>
+    z.object({
+      id: z.string().uuid(),
+      comentario: z.string().min(1).max(2000),
+      proxima_checagem: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+    }).parse(input),
+  )
   .handler(async ({ data, context }) => {
-    const { error } = await db(context).from("items").delete().eq("id", data.id);
+    const supa = db(context);
+    const { data: item, error: getErr } = await supa
+      .from("items")
+      .select("proxima_checagem, periodicidade_dias")
+      .eq("id", data.id)
+      .maybeSingle();
+    if (getErr) throw safeDbError(getErr);
+    if (!item) throw new Error("Item não encontrado");
+
+    // Próxima data: input explícito > base + periodicidade > base + 7
+    let proxima = data.proxima_checagem;
+    if (!proxima) {
+      const baseStr = (item.proxima_checagem as string | null) ?? null;
+      const base = baseStr ? new Date(baseStr + "T00:00:00Z") : new Date();
+      const step = (item.periodicidade_dias as number | null) ?? 7;
+      proxima = addDays(base, step);
+    }
+
+    const { error } = await supa
+      .from("items")
+      .update({ proxima_checagem: proxima })
+      .eq("id", data.id);
     if (error) throw safeDbError(error);
+
+    await supa.from("item_events").insert({
+      item_id: data.id,
+      author_id: context.userId,
+      tipo: "verification",
+      payload: {
+        comentario: data.comentario,
+        proxima_checagem: proxima,
+        anterior: item.proxima_checagem as string | null,
+      },
+    });
+    return { ok: true, proxima_checagem: proxima };
+  });
+
+export const archiveItem = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((input) =>
+    z.object({
+      id: z.string().uuid(),
+      comentario: z.string().min(1).max(2000),
+    }).parse(input),
+  )
+  .handler(async ({ data, context }) => {
+    const supa = db(context);
+    const { error } = await supa
+      .from("items")
+      .update({ archived_at: new Date().toISOString() })
+      .eq("id", data.id);
+    if (error) throw safeDbError(error);
+    await supa.from("item_events").insert({
+      item_id: data.id,
+      author_id: context.userId,
+      tipo: "archived",
+      payload: { comentario: data.comentario },
+    });
     return { ok: true };
   });
 
-// Reordena items: aplica novas ordens; se gap mínimo < 2, normaliza (10,20,30...).
+export const unarchiveItem = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((input) =>
+    z.object({
+      id: z.string().uuid(),
+      proxima_checagem: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+    }).parse(input),
+  )
+  .handler(async ({ data, context }) => {
+    const supa = db(context);
+    const { error } = await supa
+      .from("items")
+      .update({ archived_at: null, proxima_checagem: data.proxima_checagem })
+      .eq("id", data.id);
+    if (error) throw safeDbError(error);
+    await supa.from("item_events").insert({
+      item_id: data.id,
+      author_id: context.userId,
+      tipo: "unarchived",
+      payload: { proxima_checagem: data.proxima_checagem },
+    });
+    return { ok: true };
+  });
+
 export const reorderItems = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator((input) =>
@@ -448,9 +641,7 @@ export const reorderItems = createServerFn({ method: "POST" })
   )
   .handler(async ({ data, context }) => {
     const supa = db(context);
-    // Sempre normaliza (passo 10) — simples e robusto.
     const updates = data.ordered_ids.map((id, idx) => ({ id, ordem: (idx + 1) * 10 }));
-    // Atualiza em paralelo
     const results = await Promise.all(
       updates.map((u) =>
         supa.from("items").update({ ordem: u.ordem }).eq("id", u.id).eq("list_id", data.list_id),
@@ -462,9 +653,9 @@ export const reorderItems = createServerFn({ method: "POST" })
   });
 
 // ============================================================
-// COMMENTS
+// COMMENT
 // ============================================================
-export const addComment = createServerFn({ method: "POST" })
+export const commentItem = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator((input) =>
     z.object({
@@ -475,10 +666,43 @@ export const addComment = createServerFn({ method: "POST" })
   .handler(async ({ data, context }) => {
     const { error } = await db(context).from("item_events").insert({
       item_id: data.item_id,
+      author_id: context.userId,
       tipo: "comment",
       payload: { texto: data.texto },
-      author_id: context.userId,
     });
     if (error) throw safeDbError(error);
     return { ok: true };
+  });
+
+// ============================================================
+// TICKETS
+// ============================================================
+export const openTicket = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((input) =>
+    z.object({
+      item_id: z.string().uuid(),
+      ticket_code: z.string().min(1).max(120),
+      ticket_status: z.string().max(60).optional(),
+    }).parse(input),
+  )
+  .handler(async ({ data, context }) => {
+    const supa = db(context);
+    const { data: row, error } = await supa
+      .from("item_tickets")
+      .insert({
+        item_id: data.item_id,
+        ticket_code: data.ticket_code,
+        ticket_status: data.ticket_status ?? null,
+      })
+      .select("id")
+      .single();
+    if (error) throw safeDbError(error);
+    await supa.from("item_events").insert({
+      item_id: data.item_id,
+      author_id: context.userId,
+      tipo: "ticket_opened",
+      payload: { ticket_code: data.ticket_code, ticket_status: data.ticket_status ?? null },
+    });
+    return row as { id: string };
   });

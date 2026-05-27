@@ -20,27 +20,24 @@ export type Database = {
           id: string
           nome: string
           ordem: number
-          updated_at: string
         }
         Insert: {
           created_at?: string
           id?: string
           nome: string
           ordem?: number
-          updated_at?: string
         }
         Update: {
           created_at?: string
           id?: string
           nome?: string
           ordem?: number
-          updated_at?: string
         }
         Relationships: []
       }
       item_events: {
         Row: {
-          author_id: string | null
+          author_id: string
           created_at: string
           id: string
           item_id: string
@@ -48,7 +45,7 @@ export type Database = {
           tipo: Database["public"]["Enums"]["item_event_type"]
         }
         Insert: {
-          author_id?: string | null
+          author_id: string
           created_at?: string
           id?: string
           item_id: string
@@ -56,7 +53,7 @@ export type Database = {
           tipo: Database["public"]["Enums"]["item_event_type"]
         }
         Update: {
-          author_id?: string | null
+          author_id?: string
           created_at?: string
           id?: string
           item_id?: string
@@ -72,13 +69,6 @@ export type Database = {
             referencedColumns: ["id"]
           },
           {
-            foreignKeyName: "item_events_author_id_fkey"
-            columns: ["author_id"]
-            isOneToOne: false
-            referencedRelation: "profiles_public"
-            referencedColumns: ["id"]
-          },
-          {
             foreignKeyName: "item_events_item_id_fkey"
             columns: ["item_id"]
             isOneToOne: false
@@ -90,43 +80,29 @@ export type Database = {
       item_tickets: {
         Row: {
           created_at: string
-          created_by: string | null
-          external_ref: string | null
           id: string
           item_id: string
-          status: string | null
+          last_synced_at: string | null
+          ticket_code: string
+          ticket_status: string | null
         }
         Insert: {
           created_at?: string
-          created_by?: string | null
-          external_ref?: string | null
           id?: string
           item_id: string
-          status?: string | null
+          last_synced_at?: string | null
+          ticket_code: string
+          ticket_status?: string | null
         }
         Update: {
           created_at?: string
-          created_by?: string | null
-          external_ref?: string | null
           id?: string
           item_id?: string
-          status?: string | null
+          last_synced_at?: string | null
+          ticket_code?: string
+          ticket_status?: string | null
         }
         Relationships: [
-          {
-            foreignKeyName: "item_tickets_created_by_fkey"
-            columns: ["created_by"]
-            isOneToOne: false
-            referencedRelation: "profiles"
-            referencedColumns: ["id"]
-          },
-          {
-            foreignKeyName: "item_tickets_created_by_fkey"
-            columns: ["created_by"]
-            isOneToOne: false
-            referencedRelation: "profiles_public"
-            referencedColumns: ["id"]
-          },
           {
             foreignKeyName: "item_tickets_item_id_fkey"
             columns: ["item_id"]
@@ -138,33 +114,49 @@ export type Database = {
       }
       items: {
         Row: {
+          archived_at: string | null
+          archived_by: string | null
           created_at: string
           id: string
           list_id: string
           ordem: number
-          status: Database["public"]["Enums"]["item_status"]
+          periodicidade_dias: number | null
+          proxima_checagem: string | null
           texto: string
           updated_at: string
         }
         Insert: {
+          archived_at?: string | null
+          archived_by?: string | null
           created_at?: string
           id?: string
           list_id: string
           ordem?: number
-          status?: Database["public"]["Enums"]["item_status"]
+          periodicidade_dias?: number | null
+          proxima_checagem?: string | null
           texto: string
           updated_at?: string
         }
         Update: {
+          archived_at?: string | null
+          archived_by?: string | null
           created_at?: string
           id?: string
           list_id?: string
           ordem?: number
-          status?: Database["public"]["Enums"]["item_status"]
+          periodicidade_dias?: number | null
+          proxima_checagem?: string | null
           texto?: string
           updated_at?: string
         }
         Relationships: [
+          {
+            foreignKeyName: "items_archived_by_fkey"
+            columns: ["archived_by"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
           {
             foreignKeyName: "items_list_id_fkey"
             columns: ["list_id"]
@@ -176,6 +168,8 @@ export type Database = {
       }
       lists: {
         Row: {
+          archived_at: string | null
+          archived_by: string | null
           area_id: string
           created_at: string
           id: string
@@ -184,6 +178,8 @@ export type Database = {
           updated_at: string
         }
         Insert: {
+          archived_at?: string | null
+          archived_by?: string | null
           area_id: string
           created_at?: string
           id?: string
@@ -192,6 +188,8 @@ export type Database = {
           updated_at?: string
         }
         Update: {
+          archived_at?: string | null
+          archived_by?: string | null
           area_id?: string
           created_at?: string
           id?: string
@@ -200,6 +198,13 @@ export type Database = {
           updated_at?: string
         }
         Relationships: [
+          {
+            foreignKeyName: "lists_archived_by_fkey"
+            columns: ["archived_by"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
           {
             foreignKeyName: "lists_area_id_fkey"
             columns: ["area_id"]
@@ -212,13 +217,6 @@ export type Database = {
             columns: ["owner_id"]
             isOneToOne: false
             referencedRelation: "profiles"
-            referencedColumns: ["id"]
-          },
-          {
-            foreignKeyName: "lists_owner_id_fkey"
-            columns: ["owner_id"]
-            isOneToOne: false
-            referencedRelation: "profiles_public"
             referencedColumns: ["id"]
           },
         ]
@@ -249,35 +247,21 @@ export type Database = {
       }
     }
     Views: {
-      profiles_public: {
-        Row: {
-          full_name: string | null
-          id: string | null
-        }
-        Insert: {
-          full_name?: string | null
-          id?: string | null
-        }
-        Update: {
-          full_name?: string | null
-          id?: string | null
-        }
-        Relationships: []
-      }
+      [_ in never]: never
     }
     Functions: {
       is_admin: { Args: { _user_id: string }; Returns: boolean }
-      set_item_status: {
-        Args: {
-          _item_id: string
-          _status: Database["public"]["Enums"]["item_status"]
-        }
-        Returns: undefined
-      }
+      is_list_owner: { Args: { _list_id: string }; Returns: boolean }
     }
     Enums: {
-      item_event_type: "status_change" | "comment" | "ticket_opened"
-      item_status: "pending" | "in_progress" | "done"
+      item_event_type:
+        | "item_created"
+        | "item_edited"
+        | "verification"
+        | "comment"
+        | "archived"
+        | "unarchived"
+        | "ticket_opened"
     }
     CompositeTypes: {
       [_ in never]: never
@@ -405,8 +389,15 @@ export type CompositeTypes<
 export const Constants = {
   public: {
     Enums: {
-      item_event_type: ["status_change", "comment", "ticket_opened"],
-      item_status: ["pending", "in_progress", "done"],
+      item_event_type: [
+        "item_created",
+        "item_edited",
+        "verification",
+        "comment",
+        "archived",
+        "unarchived",
+        "ticket_opened",
+      ],
     },
   },
 } as const
