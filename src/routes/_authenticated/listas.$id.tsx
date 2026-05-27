@@ -5,14 +5,14 @@ import { useEffect, useState } from "react";
 import { toast } from "sonner";
 import {
   ArrowLeft,
+  Archive,
+  ArchiveRestore,
   Check,
-  Circle,
   GripVertical,
   Loader2,
   MoreHorizontal,
   Pencil,
   Plus,
-  Trash2,
   UserCog,
 } from "lucide-react";
 import {
@@ -35,22 +35,25 @@ import { CSS } from "@dnd-kit/utilities";
 import {
   getListDetail,
   createItem,
-  updateItemStatus,
+  verifyItem,
   updateItemText,
-  deleteItem,
+  updateItemSchedule,
+  archiveItem,
+  unarchiveItem,
   reorderItems,
-  deleteList,
+  archiveList,
+  unarchiveList,
   updateListTitle,
   transferList,
   listUsers,
   listAreas,
-  type ItemStatus,
 } from "@/lib/app.functions";
 import { useAuth } from "@/lib/auth-context";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
+import { Textarea } from "@/components/ui/textarea";
 import {
   Dialog,
   DialogContent,
@@ -66,17 +69,6 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-  AlertDialogTrigger,
-} from "@/components/ui/alert-dialog";
-import {
   Select,
   SelectContent,
   SelectItem,
@@ -88,19 +80,30 @@ export const Route = createFileRoute("/_authenticated/listas/$id")({
   component: ListDetailPage,
 });
 
-type Item = { id: string; texto: string; status: ItemStatus; ordem: number };
-
-const STATUS_NEXT: Record<ItemStatus, ItemStatus> = {
-  pending: "in_progress",
-  in_progress: "done",
-  done: "pending",
+type Item = {
+  id: string;
+  texto: string;
+  proxima_checagem: string | null;
+  periodicidade_dias: number | null;
+  ordem: number;
+  archived_at: string | null;
 };
 
-const STATUS_LABEL: Record<ItemStatus, string> = {
-  pending: "Pendente",
-  in_progress: "Em andamento",
-  done: "Concluído",
-};
+function daysUntil(dateStr: string | null | undefined): number {
+  if (!dateStr) return Number.POSITIVE_INFINITY;
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const d = new Date(dateStr + "T00:00:00");
+  return Math.round((d.getTime() - today.getTime()) / 86400000);
+}
+
+function bucketClass(days: number): string {
+  if (days < 2) return "border-red-500/50 bg-red-500/10 text-red-700 dark:text-red-300";
+  if (days <= 7) return "border-orange-500/50 bg-orange-500/10 text-orange-700 dark:text-orange-300";
+  if (days <= 15) return "border-yellow-500/60 bg-yellow-500/15 text-yellow-800 dark:text-yellow-300";
+  if (days <= 21) return "border-yellow-400/40 bg-yellow-400/10 text-yellow-700 dark:text-yellow-200";
+  return "border-emerald-500/40 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300";
+}
 
 function ListDetailPage() {
   const { id } = Route.useParams();
@@ -124,26 +127,17 @@ function ListDetailPage() {
   const isOwner = q.data?.owner_id === user?.id;
   const isAdmin = !!profile?.is_admin;
   const canEditList = isOwner || isAdmin;
-  const canEditItems = isOwner; // texto/ordem só dono
+  const canEditItems = isOwner;
+  const listArchived = !!q.data?.archived_at;
 
   const createI = useServerFn(createItem);
-  const updateStatus = useServerFn(updateItemStatus);
   const reorder = useServerFn(reorderItems);
-  const delList = useServerFn(deleteList);
+  const archList = useServerFn(archiveList);
+  const unarchList = useServerFn(unarchiveList);
   const updTitle = useServerFn(updateListTitle);
 
   const addItem = useMutation({
     mutationFn: (texto: string) => createI({ data: { list_id: id, texto } }),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["list", id] });
-      qc.invalidateQueries({ queryKey: ["home"] });
-    },
-    onError: (e: Error) => toast.error(e.message),
-  });
-
-  const setStatus = useMutation({
-    mutationFn: (p: { id: string; status: ItemStatus }) =>
-      updateStatus({ data: p }),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["list", id] });
       qc.invalidateQueries({ queryKey: ["home"] });
@@ -160,12 +154,22 @@ function ListDetailPage() {
     },
   });
 
-  const delListM = useMutation({
-    mutationFn: () => delList({ data: { id } }),
+  const archListM = useMutation({
+    mutationFn: (comentario: string) => archList({ data: { id, comentario } }),
     onSuccess: () => {
-      toast.success("Lista apagada");
+      toast.success("Lista arquivada");
       qc.invalidateQueries({ queryKey: ["home"] });
       navigate({ to: "/" });
+    },
+    onError: (e: Error) => toast.error(e.message),
+  });
+
+  const unarchListM = useMutation({
+    mutationFn: () => unarchList({ data: { id } }),
+    onSuccess: () => {
+      toast.success("Lista desarquivada");
+      qc.invalidateQueries({ queryKey: ["list", id] });
+      qc.invalidateQueries({ queryKey: ["home"] });
     },
     onError: (e: Error) => toast.error(e.message),
   });
@@ -183,7 +187,7 @@ function ListDetailPage() {
     if (oldIdx < 0 || newIdx < 0) return;
     const next = arrayMove(items, oldIdx, newIdx);
     setItems(next);
-    reorderM.mutate(next.map((i) => i.id));
+    reorderM.mutate(next.filter((i) => !i.archived_at).map((i) => i.id));
   };
 
   const [newItemText, setNewItemText] = useState("");
@@ -210,6 +214,9 @@ function ListDetailPage() {
     );
   }
 
+  const activeItems = items.filter((i) => !i.archived_at);
+  const archivedItems = items.filter((i) => i.archived_at);
+
   return (
     <div className="space-y-6">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
@@ -222,13 +229,18 @@ function ListDetailPage() {
           </Link>
           <h1 className="mt-2 text-2xl font-semibold tracking-tight">
             {q.data.titulo}
+            {listArchived && (
+              <Badge variant="outline" className="ml-2 align-middle">
+                arquivada
+              </Badge>
+            )}
           </h1>
           <p className="text-sm text-muted-foreground">
             {q.data.area_nome} · dono: {q.data.owner_name}
           </p>
         </div>
-        <div className="flex gap-2">
-          {canEditList && (
+        <div className="flex flex-wrap gap-2">
+          {canEditList && !listArchived && (
             <EditListDialog
               currentTitle={q.data.titulo}
               currentArea={q.data.area_id}
@@ -242,36 +254,21 @@ function ListDetailPage() {
               canChangeArea={isOwner}
             />
           )}
-          {isAdmin && (
+          {isAdmin && !listArchived && (
             <TransferDialog listId={id} currentOwner={q.data.owner_id} />
           )}
-          {canEditList && (
-            <AlertDialog>
-              <AlertDialogTrigger asChild>
-                <Button variant="outline" size="icon" title="Apagar lista">
-                  <Trash2 className="h-4 w-4" />
-                </Button>
-              </AlertDialogTrigger>
-              <AlertDialogContent>
-                <AlertDialogHeader>
-                  <AlertDialogTitle>Apagar esta lista?</AlertDialogTitle>
-                  <AlertDialogDescription>
-                    Todos os itens e o histórico serão removidos. Ação irreversível.
-                  </AlertDialogDescription>
-                </AlertDialogHeader>
-                <AlertDialogFooter>
-                  <AlertDialogCancel>Cancelar</AlertDialogCancel>
-                  <AlertDialogAction onClick={() => delListM.mutate()}>
-                    Apagar
-                  </AlertDialogAction>
-                </AlertDialogFooter>
-              </AlertDialogContent>
-            </AlertDialog>
+          {isOwner && !listArchived && (
+            <ArchiveListDialog onConfirm={(c) => archListM.mutate(c)} />
+          )}
+          {isOwner && listArchived && (
+            <Button variant="outline" onClick={() => unarchListM.mutate()}>
+              <ArchiveRestore className="h-4 w-4" /> Desarquivar
+            </Button>
           )}
         </div>
       </div>
 
-      {canEditItems && (
+      {canEditItems && !listArchived && (
         <form
           onSubmit={(e) => {
             e.preventDefault();
@@ -285,7 +282,7 @@ function ListDetailPage() {
           <Input
             value={newItemText}
             onChange={(e) => setNewItemText(e.target.value)}
-            placeholder="Novo item…"
+            placeholder="Novo item (próxima checagem em 7 dias)…"
             maxLength={500}
           />
           <Button type="submit" disabled={addItem.isPending || !newItemText.trim()}>
@@ -294,29 +291,56 @@ function ListDetailPage() {
         </form>
       )}
 
-      {items.length === 0 ? (
+      {activeItems.length === 0 && archivedItems.length === 0 ? (
         <div className="rounded-lg border border-dashed p-10 text-center text-sm text-muted-foreground">
           Nenhum item ainda.
         </div>
       ) : (
-        <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
-          <SortableContext items={items.map((i) => i.id)} strategy={verticalListSortingStrategy}>
-            <ul className="space-y-2">
-              {items.map((it) => (
-                <SortableRow
-                  key={it.id}
-                  item={it}
-                  listId={id}
-                  draggable={canEditItems}
-                  editable={canEditItems}
-                  onToggleStatus={() =>
-                    setStatus.mutate({ id: it.id, status: STATUS_NEXT[it.status] })
-                  }
-                />
-              ))}
-            </ul>
-          </SortableContext>
-        </DndContext>
+        <>
+          <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
+            <SortableContext items={activeItems.map((i) => i.id)} strategy={verticalListSortingStrategy}>
+              <ul className="space-y-2">
+                {activeItems.map((it) => (
+                  <SortableRow
+                    key={it.id}
+                    item={it}
+                    listId={id}
+                    draggable={canEditItems}
+                    editable={canEditItems}
+                  />
+                ))}
+              </ul>
+            </SortableContext>
+          </DndContext>
+
+          {archivedItems.length > 0 && (
+            <div className="space-y-2">
+              <h2 className="text-sm font-semibold text-muted-foreground">
+                Arquivados ({archivedItems.length})
+              </h2>
+              <ul className="space-y-2 opacity-70">
+                {archivedItems.map((it) => (
+                  <li
+                    key={it.id}
+                    className="flex items-center gap-2 rounded-md border bg-muted/30 p-3 text-sm"
+                  >
+                    <Archive className="h-3.5 w-3.5 text-muted-foreground" />
+                    <Link
+                      to="/listas/$id/itens/$itemId"
+                      params={{ id, itemId: it.id }}
+                      className="flex-1 truncate line-through"
+                    >
+                      {it.texto}
+                    </Link>
+                    {isOwner && (
+                      <UnarchiveItemButton itemId={it.id} listId={id} />
+                    )}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+        </>
       )}
     </div>
   );
@@ -327,22 +351,25 @@ function SortableRow({
   listId,
   draggable,
   editable,
-  onToggleStatus,
 }: {
   item: Item;
   listId: string;
   draggable: boolean;
   editable: boolean;
-  onToggleStatus: () => void;
 }) {
   const qc = useQueryClient();
   const updText = useServerFn(updateItemText);
-  const delI = useServerFn(deleteItem);
+  const updSched = useServerFn(updateItemSchedule);
+  const verify = useServerFn(verifyItem);
+  const archI = useServerFn(archiveItem);
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } =
     useSortable({ id: item.id, disabled: !draggable });
 
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(item.texto);
+  const [verifyOpen, setVerifyOpen] = useState(false);
+  const [archOpen, setArchOpen] = useState(false);
+  const [schedOpen, setSchedOpen] = useState(false);
 
   const save = useMutation({
     mutationFn: () => updText({ data: { id: item.id, texto: draft.trim() } }),
@@ -353,14 +380,41 @@ function SortableRow({
     onError: (e: Error) => toast.error(e.message),
   });
 
-  const del = useMutation({
-    mutationFn: () => delI({ data: { id: item.id } }),
+  const verifyM = useMutation({
+    mutationFn: (comentario: string) => verify({ data: { id: item.id, comentario } }),
     onSuccess: () => {
+      setVerifyOpen(false);
+      toast.success("Item verificado");
+      qc.invalidateQueries({ queryKey: ["list", listId] });
+      qc.invalidateQueries({ queryKey: ["home"] });
+      qc.invalidateQueries({ queryKey: ["item", item.id] });
+    },
+    onError: (e: Error) => toast.error(e.message),
+  });
+
+  const archM = useMutation({
+    mutationFn: (comentario: string) => archI({ data: { id: item.id, comentario } }),
+    onSuccess: () => {
+      setArchOpen(false);
+      toast.success("Item arquivado");
       qc.invalidateQueries({ queryKey: ["list", listId] });
       qc.invalidateQueries({ queryKey: ["home"] });
     },
     onError: (e: Error) => toast.error(e.message),
   });
+
+  const schedM = useMutation({
+    mutationFn: (p: { proxima_checagem?: string; periodicidade_dias?: number | null }) =>
+      updSched({ data: { id: item.id, ...p } }),
+    onSuccess: () => {
+      setSchedOpen(false);
+      qc.invalidateQueries({ queryKey: ["list", listId] });
+      qc.invalidateQueries({ queryKey: ["home"] });
+    },
+    onError: (e: Error) => toast.error(e.message),
+  });
+
+  const days = daysUntil(item.proxima_checagem);
 
   const style = {
     transform: CSS.Transform.toString(transform),
@@ -372,7 +426,7 @@ function SortableRow({
     <li
       ref={setNodeRef}
       style={style}
-      className="flex items-center gap-2 rounded-md border bg-card p-3 shadow-sm"
+      className={`flex items-center gap-2 rounded-md border p-3 shadow-sm ${bucketClass(days)}`}
     >
       {draggable && (
         <button
@@ -384,7 +438,14 @@ function SortableRow({
           <GripVertical className="h-4 w-4" />
         </button>
       )}
-      <StatusButton status={item.status} onClick={onToggleStatus} />
+      <button
+        type="button"
+        onClick={() => setVerifyOpen(true)}
+        title="Verificar agora"
+        className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full border-2 border-current/40 hover:bg-current/10"
+      >
+        <Check className="h-3 w-3" />
+      </button>
       {editing ? (
         <div className="flex flex-1 gap-2">
           <Input
@@ -411,16 +472,20 @@ function SortableRow({
         <Link
           to="/listas/$id/itens/$itemId"
           params={{ id: listId, itemId: item.id }}
-          className={`flex-1 truncate text-sm ${
-            item.status === "done" ? "text-muted-foreground line-through" : ""
-          }`}
+          className="flex-1 truncate text-sm text-foreground"
         >
           {item.texto}
         </Link>
       )}
-      <Badge variant="outline" className="hidden sm:inline-flex">
-        {STATUS_LABEL[item.status]}
-      </Badge>
+      <span className="hidden text-xs font-medium sm:inline">
+        {item.proxima_checagem
+          ? days < 0
+            ? `atrasado ${Math.abs(days)}d`
+            : days === 0
+              ? "hoje"
+              : `em ${days}d`
+          : "—"}
+      </span>
       {editable && !editing && (
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
@@ -432,35 +497,247 @@ function SortableRow({
             <DropdownMenuItem onClick={() => setEditing(true)}>
               <Pencil className="h-4 w-4" /> Editar texto
             </DropdownMenuItem>
+            <DropdownMenuItem onClick={() => setSchedOpen(true)}>
+              <Pencil className="h-4 w-4" /> Editar data/periodicidade
+            </DropdownMenuItem>
             <DropdownMenuItem
               className="text-destructive focus:text-destructive"
-              onClick={() => del.mutate()}
+              onClick={() => setArchOpen(true)}
             >
-              <Trash2 className="h-4 w-4" /> Apagar
+              <Archive className="h-4 w-4" /> Arquivar
             </DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>
       )}
+
+      <CommentDialog
+        open={verifyOpen}
+        onOpenChange={setVerifyOpen}
+        title="Verificar item"
+        actionLabel="Confirmar verificação"
+        pending={verifyM.isPending}
+        onConfirm={(c) => verifyM.mutate(c)}
+      />
+      <CommentDialog
+        open={archOpen}
+        onOpenChange={setArchOpen}
+        title="Arquivar item"
+        actionLabel="Arquivar"
+        pending={archM.isPending}
+        onConfirm={(c) => archM.mutate(c)}
+      />
+      <ScheduleDialog
+        open={schedOpen}
+        onOpenChange={setSchedOpen}
+        currentDate={item.proxima_checagem}
+        currentPeriod={item.periodicidade_dias}
+        pending={schedM.isPending}
+        onConfirm={(p) => schedM.mutate(p)}
+      />
     </li>
   );
 }
 
-function StatusButton({ status, onClick }: { status: ItemStatus; onClick: () => void }) {
-  const cls =
-    status === "done"
-      ? "bg-emerald-500 border-emerald-500 text-white"
-      : status === "in_progress"
-        ? "bg-blue-500 border-blue-500 text-white"
-        : "border-muted-foreground/40 text-transparent";
+function UnarchiveItemButton({ itemId, listId }: { itemId: string; listId: string }) {
+  const qc = useQueryClient();
+  const unarch = useServerFn(unarchiveItem);
+  const [open, setOpen] = useState(false);
+  const [date, setDate] = useState(() => {
+    const d = new Date();
+    d.setDate(d.getDate() + 7);
+    return d.toISOString().slice(0, 10);
+  });
+  const m = useMutation({
+    mutationFn: () => unarch({ data: { id: itemId, proxima_checagem: date } }),
+    onSuccess: () => {
+      setOpen(false);
+      toast.success("Item desarquivado");
+      qc.invalidateQueries({ queryKey: ["list", listId] });
+      qc.invalidateQueries({ queryKey: ["home"] });
+    },
+    onError: (e: Error) => toast.error(e.message),
+  });
   return (
-    <button
-      type="button"
-      onClick={onClick}
-      title={`Status: ${STATUS_LABEL[status]} (clique para alternar)`}
-      className={`flex h-5 w-5 shrink-0 items-center justify-center rounded-full border-2 transition ${cls}`}
+    <Dialog open={open} onOpenChange={setOpen}>
+      <DialogTrigger asChild>
+        <Button size="sm" variant="ghost">
+          <ArchiveRestore className="h-3.5 w-3.5" />
+        </Button>
+      </DialogTrigger>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>Desarquivar item</DialogTitle>
+        </DialogHeader>
+        <div className="space-y-2">
+          <Label>Próxima checagem</Label>
+          <Input type="date" value={date} onChange={(e) => setDate(e.target.value)} />
+        </div>
+        <DialogFooter>
+          <Button onClick={() => m.mutate()} disabled={!date || m.isPending}>
+            Desarquivar
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+function CommentDialog({
+  open,
+  onOpenChange,
+  title,
+  actionLabel,
+  pending,
+  onConfirm,
+}: {
+  open: boolean;
+  onOpenChange: (v: boolean) => void;
+  title: string;
+  actionLabel: string;
+  pending: boolean;
+  onConfirm: (comentario: string) => void;
+}) {
+  const [text, setText] = useState("");
+  useEffect(() => {
+    if (!open) setText("");
+  }, [open]);
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>{title}</DialogTitle>
+        </DialogHeader>
+        <div className="space-y-2">
+          <Label>Comentário (obrigatório)</Label>
+          <Textarea
+            value={text}
+            onChange={(e) => setText(e.target.value)}
+            rows={4}
+            maxLength={2000}
+            autoFocus
+          />
+        </div>
+        <DialogFooter>
+          <Button disabled={!text.trim() || pending} onClick={() => onConfirm(text.trim())}>
+            {actionLabel}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+function ScheduleDialog({
+  open,
+  onOpenChange,
+  currentDate,
+  currentPeriod,
+  pending,
+  onConfirm,
+}: {
+  open: boolean;
+  onOpenChange: (v: boolean) => void;
+  currentDate: string | null;
+  currentPeriod: number | null;
+  pending: boolean;
+  onConfirm: (p: { proxima_checagem?: string; periodicidade_dias?: number | null }) => void;
+}) {
+  const [date, setDate] = useState(currentDate ?? "");
+  const [period, setPeriod] = useState<string>(currentPeriod?.toString() ?? "");
+  useEffect(() => {
+    if (open) {
+      setDate(currentDate ?? "");
+      setPeriod(currentPeriod?.toString() ?? "");
+    }
+  }, [open, currentDate, currentPeriod]);
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>Editar data e periodicidade</DialogTitle>
+        </DialogHeader>
+        <div className="space-y-3">
+          <div className="space-y-2">
+            <Label>Próxima checagem</Label>
+            <Input type="date" value={date} onChange={(e) => setDate(e.target.value)} />
+          </div>
+          <div className="space-y-2">
+            <Label>Periodicidade (dias) — opcional</Label>
+            <Input
+              type="number"
+              min={1}
+              max={3650}
+              value={period}
+              onChange={(e) => setPeriod(e.target.value)}
+              placeholder="Ex.: 7"
+            />
+          </div>
+        </div>
+        <DialogFooter>
+          <Button
+            disabled={pending}
+            onClick={() => {
+              const p: { proxima_checagem?: string; periodicidade_dias?: number | null } = {};
+              if (date && date !== currentDate) p.proxima_checagem = date;
+              const parsed = period === "" ? null : Number(period);
+              if (parsed !== currentPeriod) p.periodicidade_dias = parsed;
+              onConfirm(p);
+            }}
+          >
+            Salvar
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+function ArchiveListDialog({ onConfirm }: { onConfirm: (c: string) => void }) {
+  const [open, setOpen] = useState(false);
+  const [text, setText] = useState("");
+  return (
+    <Dialog
+      open={open}
+      onOpenChange={(v) => {
+        setOpen(v);
+        if (!v) setText("");
+      }}
     >
-      {status === "done" ? <Check className="h-3 w-3" /> : <Circle className="h-2 w-2 fill-current" />}
-    </button>
+      <DialogTrigger asChild>
+        <Button variant="outline">
+          <Archive className="h-4 w-4" /> Arquivar lista
+        </Button>
+      </DialogTrigger>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>Arquivar lista</DialogTitle>
+        </DialogHeader>
+        <div className="space-y-2">
+          <Label>Comentário (obrigatório)</Label>
+          <Textarea
+            value={text}
+            onChange={(e) => setText(e.target.value)}
+            rows={4}
+            maxLength={2000}
+            autoFocus
+          />
+          <p className="text-xs text-muted-foreground">
+            Todos os itens precisam estar arquivados antes de arquivar a lista.
+          </p>
+        </div>
+        <DialogFooter>
+          <Button
+            disabled={!text.trim()}
+            onClick={() => {
+              onConfirm(text.trim());
+              setOpen(false);
+            }}
+          >
+            Arquivar
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 }
 
