@@ -118,36 +118,48 @@ export type Database = {
           archived_by: string | null
           created_at: string
           id: string
+          link: string | null
           list_id: string
           ordem: number
           periodicidade_dias: number | null
           proxima_checagem: string | null
+          responsavel_id: string | null
+          status: string | null
           texto: string
           updated_at: string
+          validade: string | null
         }
         Insert: {
           archived_at?: string | null
           archived_by?: string | null
           created_at?: string
           id?: string
+          link?: string | null
           list_id: string
           ordem?: number
           periodicidade_dias?: number | null
           proxima_checagem?: string | null
+          responsavel_id?: string | null
+          status?: string | null
           texto: string
           updated_at?: string
+          validade?: string | null
         }
         Update: {
           archived_at?: string | null
           archived_by?: string | null
           created_at?: string
           id?: string
+          link?: string | null
           list_id?: string
           ordem?: number
           periodicidade_dias?: number | null
           proxima_checagem?: string | null
+          responsavel_id?: string | null
+          status?: string | null
           texto?: string
           updated_at?: string
+          validade?: string | null
         }
         Relationships: [
           {
@@ -164,6 +176,13 @@ export type Database = {
             referencedRelation: "lists"
             referencedColumns: ["id"]
           },
+          {
+            foreignKeyName: "items_responsavel_id_fkey"
+            columns: ["responsavel_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
         ]
       }
       lists: {
@@ -174,6 +193,7 @@ export type Database = {
           created_at: string
           id: string
           owner_id: string
+          tipo: string
           titulo: string
           updated_at: string
         }
@@ -184,6 +204,7 @@ export type Database = {
           created_at?: string
           id?: string
           owner_id: string
+          tipo?: string
           titulo: string
           updated_at?: string
         }
@@ -194,6 +215,7 @@ export type Database = {
           created_at?: string
           id?: string
           owner_id?: string
+          tipo?: string
           titulo?: string
           updated_at?: string
         }
