@@ -164,8 +164,15 @@ function ListDetailPage() {
   const unarchList = useServerFn(unarchiveList);
   const updTitle = useServerFn(updateListTitle);
 
+  type NewItemInput = {
+    texto: string;
+    responsavel_id?: string | null;
+    status?: string | null;
+    validade?: string | null;
+    link?: string | null;
+  };
   const addItem = useMutation({
-    mutationFn: (texto: string) => createI({ data: { list_id: id, texto } }),
+    mutationFn: (p: NewItemInput) => createI({ data: { list_id: id, ...p } }),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["list", id] });
       qc.invalidateQueries({ queryKey: ["home"] });
