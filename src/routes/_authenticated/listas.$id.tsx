@@ -353,22 +353,31 @@ function ListDetailPage() {
         </div>
       ) : (
         <>
-          <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
-            <SortableContext items={activeItems.map((i) => i.id)} strategy={verticalListSortingStrategy}>
-              <ul className="space-y-2">
-                {activeItems.map((it) => (
-                  <SortableRow
-                    key={it.id}
-                    item={it}
-                    listId={id}
-                    draggable={canEditItems}
-                    editable={canEditItems}
-                    onOpen={() => setOpenItemId(it.id)}
-                  />
-                ))}
-              </ul>
-            </SortableContext>
-          </DndContext>
+          {isLista ? (
+            <ListaTable
+              items={activeItems}
+              ownerName={ownerName}
+              editable={canEditItems}
+              onOpen={(itemId) => setOpenItemId(itemId)}
+            />
+          ) : (
+            <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
+              <SortableContext items={activeItems.map((i) => i.id)} strategy={verticalListSortingStrategy}>
+                <ul className="space-y-2">
+                  {activeItems.map((it) => (
+                    <SortableRow
+                      key={it.id}
+                      item={it}
+                      listId={id}
+                      draggable={canEditItems}
+                      editable={canEditItems}
+                      onOpen={() => setOpenItemId(it.id)}
+                    />
+                  ))}
+                </ul>
+              </SortableContext>
+            </DndContext>
+          )}
 
           {archivedItems.length > 0 && (
             <div className="space-y-2">
