@@ -143,8 +143,16 @@ function ItemSheetBody({
     onError: (e: Error) => toast.error(e.message),
   });
 
+  type FieldsPatch = {
+    id: string;
+    texto?: string;
+    responsavel_id?: string | null;
+    status?: string | null;
+    validade?: string | null;
+    link?: string | null;
+  };
   const fieldsM = useMutation({
-    mutationFn: (p: Parameters<typeof updFields>[0]["data"]) => updFields({ data: p }),
+    mutationFn: (p: FieldsPatch) => updFields({ data: p }),
     onSuccess: () => {
       invalidate();
       toast.success("Salvo");
