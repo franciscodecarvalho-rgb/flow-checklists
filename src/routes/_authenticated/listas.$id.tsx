@@ -192,6 +192,8 @@ function ListDetailPage() {
   };
 
   const [newItemText, setNewItemText] = useState("");
+  const [openItemId, setOpenItemId] = useState<string | null>(null);
+
 
   if (q.isLoading) {
     return (
