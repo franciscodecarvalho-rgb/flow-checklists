@@ -130,6 +130,7 @@ function HomePage() {
             <h2 className="text-lg font-semibold">{area.nome}</h2>
             <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
               {lists.map((l) => {
+                const isLista = l.tipo === "lista";
                 const sorted = [...l.items].sort(
                   (a, b) => daysUntil(a.proxima_checagem) - daysUntil(b.proxima_checagem),
                 );
@@ -139,12 +140,17 @@ function HomePage() {
                   <Link key={l.id} to="/listas/$id" params={{ id: l.id }} className="block">
                     <Card className="h-full transition hover:border-primary/50 hover:shadow-md">
                       <CardHeader className="pb-2">
-                        <CardTitle className="text-base">{l.titulo}</CardTitle>
+                        <div className="flex items-start justify-between gap-2">
+                          <CardTitle className="text-base">{l.titulo}</CardTitle>
+                          <Badge variant="outline" className="shrink-0 text-[10px] uppercase tracking-wide">
+                            {isLista ? "Lista" : "Checklist"}
+                          </Badge>
+                        </div>
                         <p className="text-xs text-muted-foreground">por {l.owner_name}</p>
                       </CardHeader>
                       <CardContent className="flex flex-wrap gap-2 text-xs">
                         <Badge variant="secondary">{l.items.length} itens</Badge>
-                        {next ? (
+                        {isLista ? null : next ? (
                           <Badge variant="outline" className={bucketClass(nextDays)}>
                             próx.{" "}
                             {nextDays < 0
@@ -161,6 +167,7 @@ function HomePage() {
                   </Link>
                 );
               })}
+
             </div>
           </section>
         ))}
