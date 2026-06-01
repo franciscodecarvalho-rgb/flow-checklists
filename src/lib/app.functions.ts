@@ -157,6 +157,17 @@ export const listUsers = createServerFn({ method: "GET" })
     return data as { id: string; full_name: string | null; email: string; is_admin: boolean }[];
   });
 
+export const listProfiles = createServerFn({ method: "GET" })
+  .middleware([requireSupabaseAuth])
+  .handler(async ({ context }) => {
+    const { data, error } = await db(context)
+      .from("profiles")
+      .select("id, full_name, email")
+      .order("full_name", { ascending: true });
+    if (error) throw safeDbError(error);
+    return data as { id: string; full_name: string | null; email: string }[];
+  });
+
 // ============================================================
 // HOME — listas ativas agrupadas por área, itens ativos ordenados por data
 // ============================================================
