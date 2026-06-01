@@ -480,10 +480,23 @@ export const createItem = createServerFn({ method: "POST" })
       texto: z.string().min(1).max(500),
       proxima_checagem: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
       periodicidade_dias: z.number().int().positive().max(3650).nullable().optional(),
+      responsavel_id: z.string().uuid().nullable().optional(),
+      status: z.string().max(60).nullable().optional(),
+      validade: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullable().optional(),
+      link: z.string().max(2000).nullable().optional(),
     }).parse(input),
   )
   .handler(async ({ data, context }) => {
     const supa = db(context);
+    const { data: list, error: listErr } = await supa
+      .from("lists")
+      .select("tipo, owner_id")
+      .eq("id", data.list_id)
+      .maybeSingle();
+    if (listErr) throw safeDbError(listErr);
+    if (!list) throw new Error("Lista não encontrada");
+    const tipo = (list.tipo as string) ?? "checklist";
+
     const { data: last } = await supa
       .from("items")
       .select("ordem")
@@ -492,7 +505,11 @@ export const createItem = createServerFn({ method: "POST" })
       .limit(1)
       .maybeSingle();
     const nextOrdem = ((last?.ordem as number | undefined) ?? 0) + 10;
-    const proxima = data.proxima_checagem ?? addDays(new Date(), 7);
+
+    // Checklist: data padrão hoje+7. Lista: só se usuário informar.
+    const proxima =
+      data.proxima_checagem ?? (tipo === "checklist" ? addDays(new Date(), 7) : null);
+    const responsavel = data.responsavel_id ?? (list.owner_id as string);
 
     const { data: row, error } = await supa
       .from("items")
@@ -502,12 +519,66 @@ export const createItem = createServerFn({ method: "POST" })
         ordem: nextOrdem,
         proxima_checagem: proxima,
         periodicidade_dias: data.periodicidade_dias ?? null,
+        responsavel_id: responsavel,
+        status: data.status ?? null,
+        validade: data.validade ?? null,
+        link: data.link ?? null,
       })
       .select("id")
       .single();
     if (error) throw safeDbError(error);
     return row as { id: string };
   });
+
+export const updateItemFields = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((input) =>
+    z.object({
+      id: z.string().uuid(),
+      texto: z.string().min(1).max(500).optional(),
+      responsavel_id: z.string().uuid().nullable().optional(),
+      status: z.string().max(60).nullable().optional(),
+      validade: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullable().optional(),
+      link: z.string().max(2000).nullable().optional(),
+    }).parse(input),
+  )
+  .handler(async ({ data, context }) => {
+    const supa = db(context);
+    const { id, ...rest } = data;
+    const patch: Record<string, unknown> = {};
+    for (const k of ["texto", "responsavel_id", "status", "validade", "link"] as const) {
+      if (rest[k] !== undefined) patch[k] = rest[k];
+    }
+    if (Object.keys(patch).length === 0) return { ok: true };
+
+    const { data: prev, error: prevErr } = await supa
+      .from("items")
+      .select("texto, responsavel_id, status, validade, link")
+      .eq("id", id)
+      .maybeSingle();
+    if (prevErr) throw safeDbError(prevErr);
+    if (!prev) throw new Error("Item não encontrado");
+
+    const changes: Record<string, { from: unknown; to: unknown }> = {};
+    for (const k of Object.keys(patch)) {
+      if ((prev as Record<string, unknown>)[k] !== patch[k]) {
+        changes[k] = { from: (prev as Record<string, unknown>)[k], to: patch[k] };
+      }
+    }
+    if (Object.keys(changes).length === 0) return { ok: true };
+
+    const { error } = await supa.from("items").update(patch).eq("id", id);
+    if (error) throw safeDbError(error);
+
+    await supa.from("item_events").insert({
+      item_id: id,
+      author_id: context.userId,
+      tipo: "item_edited",
+      payload: { changes },
+    });
+    return { ok: true };
+  });
+
 
 export const updateItemText = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
