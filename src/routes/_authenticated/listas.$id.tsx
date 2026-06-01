@@ -99,7 +99,14 @@ type Item = {
   periodicidade_dias: number | null;
   ordem: number;
   archived_at: string | null;
+  responsavel_id: string | null;
+  responsavel_name: string | null;
+  status: string | null;
+  validade: string | null;
+  link: string | null;
 };
+
+const STATUS_OPTIONS = ["Vigente", "A renovar", "Vencido", "Em elaboração"] as const;
 
 function daysUntil(dateStr: string | null | undefined): number {
   if (!dateStr) return Number.POSITIVE_INFINITY;
@@ -107,6 +114,15 @@ function daysUntil(dateStr: string | null | undefined): number {
   today.setHours(0, 0, 0, 0);
   const d = new Date(dateStr + "T00:00:00");
   return Math.round((d.getTime() - today.getTime()) / 86400000);
+}
+
+function validadeLabel(dateStr: string | null): string {
+  if (!dateStr) return "—";
+  const d = daysUntil(dateStr);
+  if (d < 0) return `vencido há ${Math.abs(d)}d`;
+  if (d === 0) return "vence hoje";
+  if (d <= 30) return `vence em ${d}d`;
+  return dateStr;
 }
 
 function bucketClass(days: number): string {
