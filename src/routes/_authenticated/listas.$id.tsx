@@ -251,7 +251,17 @@ function ListDetailPage() {
     );
   }
 
-  const activeItems = items.filter((i) => !i.archived_at);
+  const isLista = q.data.tipo === "lista";
+  const ownerId = q.data.owner_id;
+  const ownerName = q.data.owner_name;
+  const activeItemsRaw = items.filter((i) => !i.archived_at);
+  const activeItems = isLista
+    ? [...activeItemsRaw].sort((a, b) => {
+        const av = a.validade ? new Date(a.validade).getTime() : Number.POSITIVE_INFINITY;
+        const bv = b.validade ? new Date(b.validade).getTime() : Number.POSITIVE_INFINITY;
+        return av - bv;
+      })
+    : activeItemsRaw;
   const archivedItems = items.filter((i) => i.archived_at);
 
   return (
