@@ -195,14 +195,16 @@ function NewListDialog({
   const qc = useQueryClient();
   const [titulo, setTitulo] = useState("");
   const [areaId, setAreaId] = useState<string>("");
+  const [tipo, setTipo] = useState<"checklist" | "lista">("checklist");
 
   const m = useMutation({
-    mutationFn: () => create({ data: { titulo, area_id: areaId } }),
+    mutationFn: () => create({ data: { titulo, area_id: areaId, tipo } }),
     onSuccess: (row) => {
       qc.invalidateQueries({ queryKey: ["home"] });
-      toast.success("Lista criada");
+      toast.success("Coleção criada");
       setTitulo("");
       setAreaId("");
+      setTipo("checklist");
       onCreated(row.id);
     },
     onError: (e: Error) => toast.error(e.message),
@@ -211,15 +213,39 @@ function NewListDialog({
   return (
     <DialogContent>
       <DialogHeader>
-        <DialogTitle>Nova lista</DialogTitle>
+        <DialogTitle>Nova coleção</DialogTitle>
       </DialogHeader>
       <div className="space-y-4">
+        <div className="space-y-2">
+          <Label>Tipo</Label>
+          <div className="grid grid-cols-2 gap-2">
+            {(["checklist", "lista"] as const).map((t) => (
+              <button
+                key={t}
+                type="button"
+                onClick={() => setTipo(t)}
+                className={`rounded-md border px-3 py-2 text-left text-sm transition ${
+                  tipo === t
+                    ? "border-primary bg-primary/10"
+                    : "border-input hover:border-primary/40"
+                }`}
+              >
+                <div className="font-medium capitalize">{t}</div>
+              </button>
+            ))}
+          </div>
+          <p className="text-xs text-muted-foreground">
+            {tipo === "checklist"
+              ? "Checklist: rotinas que se repetem em intervalos."
+              : "Lista: controle de documentos/registros sem repetição."}
+          </p>
+        </div>
         <div className="space-y-2">
           <Label>Título</Label>
           <Input
             value={titulo}
             onChange={(e) => setTitulo(e.target.value)}
-            placeholder="Ex.: Checklist envio cliente X"
+            placeholder={tipo === "checklist" ? "Ex.: Checklist envio cliente X" : "Ex.: Contratos vigentes"}
             maxLength={200}
           />
         </div>
@@ -239,6 +265,7 @@ function NewListDialog({
           </Select>
         </div>
       </div>
+
       <DialogFooter>
         <Button
           onClick={() => m.mutate()}
