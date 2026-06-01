@@ -168,7 +168,7 @@ export const listHome = createServerFn({ method: "GET" })
       supa.from("areas").select("id, nome, ordem").order("ordem").order("nome"),
       supa
         .from("lists")
-        .select("id, titulo, area_id, owner_id, created_at, updated_at")
+        .select("id, titulo, tipo, area_id, owner_id, created_at, updated_at")
         .is("archived_at", null)
         .order("titulo", { ascending: true }),
       supa
@@ -184,6 +184,7 @@ export const listHome = createServerFn({ method: "GET" })
     type ListRow = {
       id: string;
       titulo: string;
+      tipo: string;
       area_id: string;
       owner_id: string;
       created_at: string;
@@ -214,6 +215,7 @@ export const listHome = createServerFn({ method: "GET" })
       lists: lists.map((l) => ({
         id: l.id,
         titulo: l.titulo,
+        tipo: l.tipo,
         area_id: l.area_id,
         owner_id: l.owner_id,
         owner_name: names.get(l.owner_id) ?? "—",
@@ -221,6 +223,7 @@ export const listHome = createServerFn({ method: "GET" })
       })),
     };
   });
+
 
 // ============================================================
 // LIST DETAIL
@@ -232,42 +235,58 @@ export const getListDetail = createServerFn({ method: "GET" })
     const supa = db(context);
     const { data: list, error } = await supa
       .from("lists")
-      .select("id, titulo, area_id, owner_id, archived_at, archived_by, created_at, updated_at, areas:area_id(nome)")
+      .select("id, titulo, tipo, area_id, owner_id, archived_at, archived_by, created_at, updated_at, areas:area_id(nome)")
       .eq("id", data.id)
       .maybeSingle();
     if (error) throw safeDbError(error);
     if (!list) throw new Error("Lista não encontrada");
 
-    const names = await resolveNames(supa, [list.owner_id as string, list.archived_by as string | null]);
-
     const { data: items, error: itemsErr } = await supa
       .from("items")
-      .select("id, texto, proxima_checagem, periodicidade_dias, ordem, archived_at")
+      .select("id, texto, proxima_checagem, periodicidade_dias, ordem, archived_at, responsavel_id, status, validade, link")
       .eq("list_id", data.id)
       .order("archived_at", { ascending: true, nullsFirst: true })
       .order("proxima_checagem", { ascending: true, nullsFirst: false })
       .order("ordem", { ascending: true });
     if (itemsErr) throw safeDbError(itemsErr);
 
+    type ItemRow = {
+      id: string;
+      texto: string;
+      proxima_checagem: string | null;
+      periodicidade_dias: number | null;
+      ordem: number;
+      archived_at: string | null;
+      responsavel_id: string | null;
+      status: string | null;
+      validade: string | null;
+      link: string | null;
+    };
+    const itemRows = (items ?? []) as ItemRow[];
+
+    const names = await resolveNames(supa, [
+      list.owner_id as string,
+      list.archived_by as string | null,
+      ...itemRows.map((i) => i.responsavel_id),
+    ]);
+
     return {
       id: list.id as string,
       titulo: list.titulo as string,
+      tipo: list.tipo as string,
       area_id: list.area_id as string,
       area_nome: (list.areas?.nome as string) ?? "",
       owner_id: list.owner_id as string,
       owner_name: names.get(list.owner_id as string) ?? "—",
       archived_at: (list.archived_at as string | null) ?? null,
       archived_by_name: list.archived_by ? names.get(list.archived_by as string) ?? "—" : null,
-      items: items as {
-        id: string;
-        texto: string;
-        proxima_checagem: string | null;
-        periodicidade_dias: number | null;
-        ordem: number;
-        archived_at: string | null;
-      }[],
+      items: itemRows.map((i) => ({
+        ...i,
+        responsavel_name: i.responsavel_id ? names.get(i.responsavel_id) ?? "—" : null,
+      })),
     };
   });
+
 
 // ============================================================
 // ITEM DETAIL + timeline + tickets
@@ -354,17 +373,24 @@ export const createList = createServerFn({ method: "POST" })
     z.object({
       titulo: z.string().min(1).max(200),
       area_id: z.string().uuid(),
+      tipo: z.enum(["checklist", "lista"]).optional(),
     }).parse(input),
   )
   .handler(async ({ data, context }) => {
     const { data: row, error } = await db(context)
       .from("lists")
-      .insert({ titulo: data.titulo, area_id: data.area_id, owner_id: context.userId })
+      .insert({
+        titulo: data.titulo,
+        area_id: data.area_id,
+        owner_id: context.userId,
+        tipo: data.tipo ?? "checklist",
+      })
       .select("id")
       .single();
     if (error) throw safeDbError(error);
     return row as { id: string };
   });
+
 
 export const updateListTitle = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
@@ -454,10 +480,23 @@ export const createItem = createServerFn({ method: "POST" })
       texto: z.string().min(1).max(500),
       proxima_checagem: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
       periodicidade_dias: z.number().int().positive().max(3650).nullable().optional(),
+      responsavel_id: z.string().uuid().nullable().optional(),
+      status: z.string().max(60).nullable().optional(),
+      validade: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullable().optional(),
+      link: z.string().max(2000).nullable().optional(),
     }).parse(input),
   )
   .handler(async ({ data, context }) => {
     const supa = db(context);
+    const { data: list, error: listErr } = await supa
+      .from("lists")
+      .select("tipo, owner_id")
+      .eq("id", data.list_id)
+      .maybeSingle();
+    if (listErr) throw safeDbError(listErr);
+    if (!list) throw new Error("Lista não encontrada");
+    const tipo = (list.tipo as string) ?? "checklist";
+
     const { data: last } = await supa
       .from("items")
       .select("ordem")
@@ -466,7 +505,11 @@ export const createItem = createServerFn({ method: "POST" })
       .limit(1)
       .maybeSingle();
     const nextOrdem = ((last?.ordem as number | undefined) ?? 0) + 10;
-    const proxima = data.proxima_checagem ?? addDays(new Date(), 7);
+
+    // Checklist: data padrão hoje+7. Lista: só se usuário informar.
+    const proxima =
+      data.proxima_checagem ?? (tipo === "checklist" ? addDays(new Date(), 7) : null);
+    const responsavel = data.responsavel_id ?? (list.owner_id as string);
 
     const { data: row, error } = await supa
       .from("items")
@@ -476,12 +519,66 @@ export const createItem = createServerFn({ method: "POST" })
         ordem: nextOrdem,
         proxima_checagem: proxima,
         periodicidade_dias: data.periodicidade_dias ?? null,
+        responsavel_id: responsavel,
+        status: data.status ?? null,
+        validade: data.validade ?? null,
+        link: data.link ?? null,
       })
       .select("id")
       .single();
     if (error) throw safeDbError(error);
     return row as { id: string };
   });
+
+export const updateItemFields = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((input) =>
+    z.object({
+      id: z.string().uuid(),
+      texto: z.string().min(1).max(500).optional(),
+      responsavel_id: z.string().uuid().nullable().optional(),
+      status: z.string().max(60).nullable().optional(),
+      validade: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullable().optional(),
+      link: z.string().max(2000).nullable().optional(),
+    }).parse(input),
+  )
+  .handler(async ({ data, context }) => {
+    const supa = db(context);
+    const { id, ...rest } = data;
+    const patch: Record<string, unknown> = {};
+    for (const k of ["texto", "responsavel_id", "status", "validade", "link"] as const) {
+      if (rest[k] !== undefined) patch[k] = rest[k];
+    }
+    if (Object.keys(patch).length === 0) return { ok: true };
+
+    const { data: prev, error: prevErr } = await supa
+      .from("items")
+      .select("texto, responsavel_id, status, validade, link")
+      .eq("id", id)
+      .maybeSingle();
+    if (prevErr) throw safeDbError(prevErr);
+    if (!prev) throw new Error("Item não encontrado");
+
+    const changes: Record<string, { from: unknown; to: unknown }> = {};
+    for (const k of Object.keys(patch)) {
+      if ((prev as Record<string, unknown>)[k] !== patch[k]) {
+        changes[k] = { from: (prev as Record<string, unknown>)[k], to: patch[k] };
+      }
+    }
+    if (Object.keys(changes).length === 0) return { ok: true };
+
+    const { error } = await supa.from("items").update(patch).eq("id", id);
+    if (error) throw safeDbError(error);
+
+    await supa.from("item_events").insert({
+      item_id: id,
+      author_id: context.userId,
+      tipo: "item_edited",
+      payload: { changes },
+    });
+    return { ok: true };
+  });
+
 
 export const updateItemText = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
