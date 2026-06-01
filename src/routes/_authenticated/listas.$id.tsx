@@ -483,13 +483,13 @@ function SortableRow({
           </Button>
         </div>
       ) : (
-        <Link
-          to="/listas/$id/itens/$itemId"
-          params={{ id: listId, itemId: item.id }}
-          className="flex-1 truncate text-sm text-foreground"
+        <button
+          type="button"
+          onClick={onOpen}
+          className="flex-1 truncate text-left text-sm text-foreground hover:underline"
         >
           {item.texto}
-        </Link>
+        </button>
       )}
       <span className="hidden text-xs font-medium sm:inline">
         {item.proxima_checagem
