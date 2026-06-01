@@ -363,11 +363,13 @@ function SortableRow({
   listId,
   draggable,
   editable,
+  onOpen,
 }: {
   item: Item;
   listId: string;
   draggable: boolean;
   editable: boolean;
+  onOpen: () => void;
 }) {
   const qc = useQueryClient();
   const updText = useServerFn(updateItemText);
