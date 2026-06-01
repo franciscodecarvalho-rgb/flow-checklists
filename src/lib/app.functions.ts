@@ -310,7 +310,7 @@ export const getItemDetail = createServerFn({ method: "GET" })
     const { data: item, error } = await supa
       .from("items")
       .select(
-        "id, texto, proxima_checagem, periodicidade_dias, ordem, archived_at, archived_by, list_id, lists:list_id(id, titulo, owner_id)",
+        "id, texto, proxima_checagem, periodicidade_dias, ordem, archived_at, archived_by, list_id, responsavel_id, status, validade, link, lists:list_id(id, titulo, owner_id, tipo)",
       )
       .eq("id", data.id)
       .maybeSingle();
@@ -344,6 +344,7 @@ export const getItemDetail = createServerFn({ method: "GET" })
       ...evRows.map((e) => e.author_id),
       item.archived_by as string | null,
       (item.lists?.owner_id as string) ?? null,
+      item.responsavel_id as string | null,
     ];
     const names = await resolveNames(supa, ids);
 
@@ -356,8 +357,16 @@ export const getItemDetail = createServerFn({ method: "GET" })
       archived_by_name: item.archived_by ? names.get(item.archived_by as string) ?? "—" : null,
       list_id: item.list_id as string,
       list_titulo: (item.lists?.titulo as string) ?? "",
+      list_tipo: (item.lists?.tipo as string) ?? "checklist",
       list_owner_id: (item.lists?.owner_id as string) ?? "",
       list_owner_name: names.get((item.lists?.owner_id as string) ?? "") ?? "—",
+      responsavel_id: (item.responsavel_id as string | null) ?? null,
+      responsavel_name: item.responsavel_id
+        ? names.get(item.responsavel_id as string) ?? "—"
+        : null,
+      status: (item.status as string | null) ?? null,
+      validade: (item.validade as string | null) ?? null,
+      link: (item.link as string | null) ?? null,
       events: evRows.map((e) => ({
         id: e.id,
         tipo: e.tipo,
