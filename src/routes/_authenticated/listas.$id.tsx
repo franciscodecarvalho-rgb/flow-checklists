@@ -38,6 +38,7 @@ import {
   verifyItem,
   updateItemText,
   updateItemSchedule,
+  updateItemFields,
   archiveItem,
   unarchiveItem,
   reorderItems,
@@ -46,9 +47,19 @@ import {
   updateListTitle,
   transferList,
   listUsers,
+  listProfiles,
   listAreas,
 } from "@/lib/app.functions";
 import { ItemSheet } from "@/components/ItemSheet";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
+import { ExternalLink } from "lucide-react";
 import { useAuth } from "@/lib/auth-context";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -88,7 +99,14 @@ type Item = {
   periodicidade_dias: number | null;
   ordem: number;
   archived_at: string | null;
+  responsavel_id: string | null;
+  responsavel_name: string | null;
+  status: string | null;
+  validade: string | null;
+  link: string | null;
 };
+
+const STATUS_OPTIONS = ["Vigente", "A renovar", "Vencido", "Em elaboração"] as const;
 
 function daysUntil(dateStr: string | null | undefined): number {
   if (!dateStr) return Number.POSITIVE_INFINITY;
@@ -96,6 +114,15 @@ function daysUntil(dateStr: string | null | undefined): number {
   today.setHours(0, 0, 0, 0);
   const d = new Date(dateStr + "T00:00:00");
   return Math.round((d.getTime() - today.getTime()) / 86400000);
+}
+
+function validadeLabel(dateStr: string | null): string {
+  if (!dateStr) return "—";
+  const d = daysUntil(dateStr);
+  if (d < 0) return `vencido há ${Math.abs(d)}d`;
+  if (d === 0) return "vence hoje";
+  if (d <= 30) return `vence em ${d}d`;
+  return dateStr;
 }
 
 function bucketClass(days: number): string {
@@ -137,8 +164,15 @@ function ListDetailPage() {
   const unarchList = useServerFn(unarchiveList);
   const updTitle = useServerFn(updateListTitle);
 
+  type NewItemInput = {
+    texto: string;
+    responsavel_id?: string | null;
+    status?: string | null;
+    validade?: string | null;
+    link?: string | null;
+  };
   const addItem = useMutation({
-    mutationFn: (texto: string) => createI({ data: { list_id: id, texto } }),
+    mutationFn: (p: NewItemInput) => createI({ data: { list_id: id, ...p } }),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["list", id] });
       qc.invalidateQueries({ queryKey: ["home"] });
@@ -217,7 +251,17 @@ function ListDetailPage() {
     );
   }
 
-  const activeItems = items.filter((i) => !i.archived_at);
+  const isLista = q.data.tipo === "lista";
+  const ownerId = q.data.owner_id;
+  const ownerName = q.data.owner_name;
+  const activeItemsRaw = items.filter((i) => !i.archived_at);
+  const activeItems = isLista
+    ? [...activeItemsRaw].sort((a, b) => {
+        const av = a.validade ? new Date(a.validade).getTime() : Number.POSITIVE_INFINITY;
+        const bv = b.validade ? new Date(b.validade).getTime() : Number.POSITIVE_INFINITY;
+        return av - bv;
+      })
+    : activeItemsRaw;
   const archivedItems = items.filter((i) => i.archived_at);
 
   return (
@@ -272,26 +316,35 @@ function ListDetailPage() {
       </div>
 
       {canEditItems && !listArchived && (
-        <form
-          onSubmit={(e) => {
-            e.preventDefault();
-            if (!newItemText.trim()) return;
-            addItem.mutate(newItemText.trim(), {
-              onSuccess: () => setNewItemText(""),
-            });
-          }}
-          className="flex gap-2"
-        >
-          <Input
-            value={newItemText}
-            onChange={(e) => setNewItemText(e.target.value)}
-            placeholder="Novo item (próxima checagem em 7 dias)…"
-            maxLength={500}
+        isLista ? (
+          <NewListaItemForm
+            ownerId={ownerId}
+            ownerName={ownerName}
+            pending={addItem.isPending}
+            onSubmit={(p) => addItem.mutate(p)}
           />
-          <Button type="submit" disabled={addItem.isPending || !newItemText.trim()}>
-            <Plus className="h-4 w-4" /> Adicionar
-          </Button>
-        </form>
+        ) : (
+          <form
+            onSubmit={(e) => {
+              e.preventDefault();
+              if (!newItemText.trim()) return;
+              addItem.mutate({ texto: newItemText.trim() }, {
+                onSuccess: () => setNewItemText(""),
+              });
+            }}
+            className="flex gap-2"
+          >
+            <Input
+              value={newItemText}
+              onChange={(e) => setNewItemText(e.target.value)}
+              placeholder="Novo item (próxima checagem em 7 dias)…"
+              maxLength={500}
+            />
+            <Button type="submit" disabled={addItem.isPending || !newItemText.trim()}>
+              <Plus className="h-4 w-4" /> Adicionar
+            </Button>
+          </form>
+        )
       )}
 
       {activeItems.length === 0 && archivedItems.length === 0 ? (
@@ -300,22 +353,31 @@ function ListDetailPage() {
         </div>
       ) : (
         <>
-          <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
-            <SortableContext items={activeItems.map((i) => i.id)} strategy={verticalListSortingStrategy}>
-              <ul className="space-y-2">
-                {activeItems.map((it) => (
-                  <SortableRow
-                    key={it.id}
-                    item={it}
-                    listId={id}
-                    draggable={canEditItems}
-                    editable={canEditItems}
-                    onOpen={() => setOpenItemId(it.id)}
-                  />
-                ))}
-              </ul>
-            </SortableContext>
-          </DndContext>
+          {isLista ? (
+            <ListaTable
+              items={activeItems}
+              ownerName={ownerName}
+              editable={canEditItems}
+              onOpen={(itemId) => setOpenItemId(itemId)}
+            />
+          ) : (
+            <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
+              <SortableContext items={activeItems.map((i) => i.id)} strategy={verticalListSortingStrategy}>
+                <ul className="space-y-2">
+                  {activeItems.map((it) => (
+                    <SortableRow
+                      key={it.id}
+                      item={it}
+                      listId={id}
+                      draggable={canEditItems}
+                      editable={canEditItems}
+                      onOpen={() => setOpenItemId(it.id)}
+                    />
+                  ))}
+                </ul>
+              </SortableContext>
+            </DndContext>
+          )}
 
           {archivedItems.length > 0 && (
             <div className="space-y-2">
@@ -914,5 +976,269 @@ function TransferDialog({ listId, currentOwner }: { listId: string; currentOwner
         </DialogFooter>
       </DialogContent>
     </Dialog>
+  );
+}
+
+function NewListaItemForm({
+  ownerId,
+  ownerName,
+  pending,
+  onSubmit,
+}: {
+  ownerId: string;
+  ownerName: string;
+  pending: boolean;
+  onSubmit: (p: {
+    texto: string;
+    responsavel_id?: string | null;
+    status?: string | null;
+    validade?: string | null;
+    link?: string | null;
+  }) => void;
+}) {
+  const profilesFn = useServerFn(listProfiles);
+  const usersQ = useQuery({ queryKey: ["profiles"], queryFn: () => profilesFn() });
+  const [texto, setTexto] = useState("");
+  const [responsavelId, setResponsavelId] = useState<string>(ownerId);
+  const [status, setStatus] = useState<string>("");
+  const [validade, setValidade] = useState("");
+  const [link, setLink] = useState("");
+
+  return (
+    <form
+      onSubmit={(e) => {
+        e.preventDefault();
+        if (!texto.trim()) return;
+        onSubmit({
+          texto: texto.trim(),
+          responsavel_id: responsavelId || null,
+          status: status || null,
+          validade: validade || null,
+          link: link.trim() || null,
+        });
+        setTexto("");
+        setStatus("");
+        setValidade("");
+        setLink("");
+        setResponsavelId(ownerId);
+      }}
+      className="space-y-3 rounded-md border bg-card p-4"
+    >
+      <div className="grid gap-3 sm:grid-cols-2">
+        <div className="space-y-1 sm:col-span-2">
+          <Label>Item / Documento *</Label>
+          <Input
+            value={texto}
+            onChange={(e) => setTexto(e.target.value)}
+            placeholder="Ex.: Alvará sanitário"
+            maxLength={500}
+          />
+        </div>
+        <div className="space-y-1">
+          <Label>Responsável</Label>
+          <Select value={responsavelId} onValueChange={setResponsavelId}>
+            <SelectTrigger>
+              <SelectValue placeholder={ownerName} />
+            </SelectTrigger>
+            <SelectContent>
+              {(usersQ.data ?? []).map((u) => (
+                <SelectItem key={u.id} value={u.id}>
+                  {u.full_name || u.email}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+        <div className="space-y-1">
+          <Label>Status</Label>
+          <Select value={status} onValueChange={setStatus}>
+            <SelectTrigger>
+              <SelectValue placeholder="—" />
+            </SelectTrigger>
+            <SelectContent>
+              {STATUS_OPTIONS.map((s) => (
+                <SelectItem key={s} value={s}>
+                  {s}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+        <div className="space-y-1">
+          <Label>Validade</Label>
+          <Input type="date" value={validade} onChange={(e) => setValidade(e.target.value)} />
+        </div>
+        <div className="space-y-1">
+          <Label>Link</Label>
+          <Input
+            value={link}
+            onChange={(e) => setLink(e.target.value)}
+            placeholder="https://…"
+            maxLength={2000}
+          />
+        </div>
+      </div>
+      <div className="flex justify-end">
+        <Button type="submit" disabled={pending || !texto.trim()}>
+          <Plus className="h-4 w-4" /> Adicionar
+        </Button>
+      </div>
+    </form>
+  );
+}
+
+function ListaTable({
+  items,
+  ownerName,
+  editable,
+  onOpen,
+}: {
+  items: Item[];
+  ownerName: string;
+  editable: boolean;
+  onOpen: (itemId: string) => void;
+}) {
+  const qc = useQueryClient();
+  const profilesFn = useServerFn(listProfiles);
+  const updFields = useServerFn(updateItemFields);
+  const usersQ = useQuery({ queryKey: ["profiles"], queryFn: () => profilesFn() });
+
+  const update = useMutation({
+    mutationFn: (p: {
+      id: string;
+      responsavel_id?: string | null;
+      status?: string | null;
+      validade?: string | null;
+      link?: string | null;
+    }) => updFields({ data: p }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["list"] });
+      qc.invalidateQueries({ queryKey: ["home"] });
+    },
+    onError: (e: Error) => toast.error(e.message),
+  });
+
+  return (
+    <div className="overflow-x-auto rounded-md border bg-card">
+      <Table>
+        <TableHeader>
+          <TableRow>
+            <TableHead className="w-[32%]">Item / Documento</TableHead>
+            <TableHead>Responsável</TableHead>
+            <TableHead>Status</TableHead>
+            <TableHead>Validade</TableHead>
+            <TableHead>Link</TableHead>
+          </TableRow>
+        </TableHeader>
+        <TableBody>
+          {items.map((it) => {
+            const respName = it.responsavel_name ?? ownerName;
+            return (
+              <TableRow key={it.id} className="align-middle">
+                <TableCell>
+                  <button
+                    type="button"
+                    onClick={() => onOpen(it.id)}
+                    className="text-left text-sm font-medium text-foreground hover:underline"
+                  >
+                    {it.texto}
+                  </button>
+                </TableCell>
+                <TableCell className="min-w-[160px]">
+                  {editable ? (
+                    <Select
+                      value={it.responsavel_id ?? ""}
+                      onValueChange={(v) =>
+                        update.mutate({ id: it.id, responsavel_id: v || null })
+                      }
+                    >
+                      <SelectTrigger className="h-8">
+                        <SelectValue placeholder={respName} />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {(usersQ.data ?? []).map((u) => (
+                          <SelectItem key={u.id} value={u.id}>
+                            {u.full_name || u.email}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  ) : (
+                    <span className="text-sm">{respName}</span>
+                  )}
+                </TableCell>
+                <TableCell className="min-w-[140px]">
+                  {editable ? (
+                    <Select
+                      value={it.status ?? ""}
+                      onValueChange={(v) =>
+                        update.mutate({ id: it.id, status: v || null })
+                      }
+                    >
+                      <SelectTrigger className="h-8">
+                        <SelectValue placeholder="—" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {STATUS_OPTIONS.map((s) => (
+                          <SelectItem key={s} value={s}>
+                            {s}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  ) : (
+                    <span className="text-sm">{it.status ?? "—"}</span>
+                  )}
+                </TableCell>
+                <TableCell className="min-w-[160px]">
+                  {editable ? (
+                    <div className="space-y-0.5">
+                      <Input
+                        type="date"
+                        value={it.validade ?? ""}
+                        onChange={(e) =>
+                          update.mutate({
+                            id: it.id,
+                            validade: e.target.value || null,
+                          })
+                        }
+                        className="h-8"
+                      />
+                      {it.validade && (
+                        <span className="text-xs text-muted-foreground">
+                          {validadeLabel(it.validade)}
+                        </span>
+                      )}
+                    </div>
+                  ) : (
+                    <span className="text-sm">{validadeLabel(it.validade)}</span>
+                  )}
+                </TableCell>
+                <TableCell>
+                  {it.link ? (
+                    <a
+                      href={it.link}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="inline-flex items-center gap-1 text-sm text-primary hover:underline"
+                    >
+                      <ExternalLink className="h-3 w-3" /> abrir
+                    </a>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={() => onOpen(it.id)}
+                      className="text-xs text-muted-foreground hover:text-foreground"
+                    >
+                      adicionar…
+                    </button>
+                  )}
+                </TableCell>
+              </TableRow>
+            );
+          })}
+        </TableBody>
+      </Table>
+    </div>
   );
 }
