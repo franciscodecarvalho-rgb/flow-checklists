@@ -316,26 +316,35 @@ function ListDetailPage() {
       </div>
 
       {canEditItems && !listArchived && (
-        <form
-          onSubmit={(e) => {
-            e.preventDefault();
-            if (!newItemText.trim()) return;
-            addItem.mutate(newItemText.trim(), {
-              onSuccess: () => setNewItemText(""),
-            });
-          }}
-          className="flex gap-2"
-        >
-          <Input
-            value={newItemText}
-            onChange={(e) => setNewItemText(e.target.value)}
-            placeholder="Novo item (próxima checagem em 7 dias)…"
-            maxLength={500}
+        isLista ? (
+          <NewListaItemForm
+            ownerId={ownerId}
+            ownerName={ownerName}
+            pending={addItem.isPending}
+            onSubmit={(p) => addItem.mutate(p)}
           />
-          <Button type="submit" disabled={addItem.isPending || !newItemText.trim()}>
-            <Plus className="h-4 w-4" /> Adicionar
-          </Button>
-        </form>
+        ) : (
+          <form
+            onSubmit={(e) => {
+              e.preventDefault();
+              if (!newItemText.trim()) return;
+              addItem.mutate({ texto: newItemText.trim() }, {
+                onSuccess: () => setNewItemText(""),
+              });
+            }}
+            className="flex gap-2"
+          >
+            <Input
+              value={newItemText}
+              onChange={(e) => setNewItemText(e.target.value)}
+              placeholder="Novo item (próxima checagem em 7 dias)…"
+              maxLength={500}
+            />
+            <Button type="submit" disabled={addItem.isPending || !newItemText.trim()}>
+              <Plus className="h-4 w-4" /> Adicionar
+            </Button>
+          </form>
+        )
       )}
 
       {activeItems.length === 0 && archivedItems.length === 0 ? (
