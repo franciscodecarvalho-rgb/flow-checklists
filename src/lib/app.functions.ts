@@ -168,7 +168,7 @@ export const listHome = createServerFn({ method: "GET" })
       supa.from("areas").select("id, nome, ordem").order("ordem").order("nome"),
       supa
         .from("lists")
-        .select("id, titulo, area_id, owner_id, created_at, updated_at")
+        .select("id, titulo, tipo, area_id, owner_id, created_at, updated_at")
         .is("archived_at", null)
         .order("titulo", { ascending: true }),
       supa
@@ -184,6 +184,7 @@ export const listHome = createServerFn({ method: "GET" })
     type ListRow = {
       id: string;
       titulo: string;
+      tipo: string;
       area_id: string;
       owner_id: string;
       created_at: string;
@@ -214,6 +215,7 @@ export const listHome = createServerFn({ method: "GET" })
       lists: lists.map((l) => ({
         id: l.id,
         titulo: l.titulo,
+        tipo: l.tipo,
         area_id: l.area_id,
         owner_id: l.owner_id,
         owner_name: names.get(l.owner_id) ?? "—",
@@ -221,6 +223,7 @@ export const listHome = createServerFn({ method: "GET" })
       })),
     };
   });
+
 
 // ============================================================
 // LIST DETAIL
