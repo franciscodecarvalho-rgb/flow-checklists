@@ -256,7 +256,7 @@ function ItemSheetBody({
       toast.info("Nada a salvar");
       return;
     }
-    fieldsM.mutate(patch as Parameters<typeof updFields>[0]["data"]);
+    fieldsM.mutate(patch as FieldsPatch);
   };
 
   const saveSchedule = () => {
