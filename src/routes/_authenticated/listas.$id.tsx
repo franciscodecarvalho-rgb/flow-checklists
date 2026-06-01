@@ -978,3 +978,267 @@ function TransferDialog({ listId, currentOwner }: { listId: string; currentOwner
     </Dialog>
   );
 }
+
+function NewListaItemForm({
+  ownerId,
+  ownerName,
+  pending,
+  onSubmit,
+}: {
+  ownerId: string;
+  ownerName: string;
+  pending: boolean;
+  onSubmit: (p: {
+    texto: string;
+    responsavel_id?: string | null;
+    status?: string | null;
+    validade?: string | null;
+    link?: string | null;
+  }) => void;
+}) {
+  const profilesFn = useServerFn(listProfiles);
+  const usersQ = useQuery({ queryKey: ["profiles"], queryFn: () => profilesFn() });
+  const [texto, setTexto] = useState("");
+  const [responsavelId, setResponsavelId] = useState<string>(ownerId);
+  const [status, setStatus] = useState<string>("");
+  const [validade, setValidade] = useState("");
+  const [link, setLink] = useState("");
+
+  return (
+    <form
+      onSubmit={(e) => {
+        e.preventDefault();
+        if (!texto.trim()) return;
+        onSubmit({
+          texto: texto.trim(),
+          responsavel_id: responsavelId || null,
+          status: status || null,
+          validade: validade || null,
+          link: link.trim() || null,
+        });
+        setTexto("");
+        setStatus("");
+        setValidade("");
+        setLink("");
+        setResponsavelId(ownerId);
+      }}
+      className="space-y-3 rounded-md border bg-card p-4"
+    >
+      <div className="grid gap-3 sm:grid-cols-2">
+        <div className="space-y-1 sm:col-span-2">
+          <Label>Item / Documento *</Label>
+          <Input
+            value={texto}
+            onChange={(e) => setTexto(e.target.value)}
+            placeholder="Ex.: Alvará sanitário"
+            maxLength={500}
+          />
+        </div>
+        <div className="space-y-1">
+          <Label>Responsável</Label>
+          <Select value={responsavelId} onValueChange={setResponsavelId}>
+            <SelectTrigger>
+              <SelectValue placeholder={ownerName} />
+            </SelectTrigger>
+            <SelectContent>
+              {(usersQ.data ?? []).map((u) => (
+                <SelectItem key={u.id} value={u.id}>
+                  {u.full_name || u.email}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+        <div className="space-y-1">
+          <Label>Status</Label>
+          <Select value={status} onValueChange={setStatus}>
+            <SelectTrigger>
+              <SelectValue placeholder="—" />
+            </SelectTrigger>
+            <SelectContent>
+              {STATUS_OPTIONS.map((s) => (
+                <SelectItem key={s} value={s}>
+                  {s}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+        <div className="space-y-1">
+          <Label>Validade</Label>
+          <Input type="date" value={validade} onChange={(e) => setValidade(e.target.value)} />
+        </div>
+        <div className="space-y-1">
+          <Label>Link</Label>
+          <Input
+            value={link}
+            onChange={(e) => setLink(e.target.value)}
+            placeholder="https://…"
+            maxLength={2000}
+          />
+        </div>
+      </div>
+      <div className="flex justify-end">
+        <Button type="submit" disabled={pending || !texto.trim()}>
+          <Plus className="h-4 w-4" /> Adicionar
+        </Button>
+      </div>
+    </form>
+  );
+}
+
+function ListaTable({
+  items,
+  ownerName,
+  editable,
+  onOpen,
+}: {
+  items: Item[];
+  ownerName: string;
+  editable: boolean;
+  onOpen: (itemId: string) => void;
+}) {
+  const qc = useQueryClient();
+  const profilesFn = useServerFn(listProfiles);
+  const updFields = useServerFn(updateItemFields);
+  const usersQ = useQuery({ queryKey: ["profiles"], queryFn: () => profilesFn() });
+
+  const update = useMutation({
+    mutationFn: (p: {
+      id: string;
+      responsavel_id?: string | null;
+      status?: string | null;
+      validade?: string | null;
+      link?: string | null;
+    }) => updFields({ data: p }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["list"] });
+      qc.invalidateQueries({ queryKey: ["home"] });
+    },
+    onError: (e: Error) => toast.error(e.message),
+  });
+
+  return (
+    <div className="overflow-x-auto rounded-md border bg-card">
+      <Table>
+        <TableHeader>
+          <TableRow>
+            <TableHead className="w-[32%]">Item / Documento</TableHead>
+            <TableHead>Responsável</TableHead>
+            <TableHead>Status</TableHead>
+            <TableHead>Validade</TableHead>
+            <TableHead>Link</TableHead>
+          </TableRow>
+        </TableHeader>
+        <TableBody>
+          {items.map((it) => {
+            const respName = it.responsavel_name ?? ownerName;
+            return (
+              <TableRow key={it.id} className="align-middle">
+                <TableCell>
+                  <button
+                    type="button"
+                    onClick={() => onOpen(it.id)}
+                    className="text-left text-sm font-medium text-foreground hover:underline"
+                  >
+                    {it.texto}
+                  </button>
+                </TableCell>
+                <TableCell className="min-w-[160px]">
+                  {editable ? (
+                    <Select
+                      value={it.responsavel_id ?? ""}
+                      onValueChange={(v) =>
+                        update.mutate({ id: it.id, responsavel_id: v || null })
+                      }
+                    >
+                      <SelectTrigger className="h-8">
+                        <SelectValue placeholder={respName} />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {(usersQ.data ?? []).map((u) => (
+                          <SelectItem key={u.id} value={u.id}>
+                            {u.full_name || u.email}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  ) : (
+                    <span className="text-sm">{respName}</span>
+                  )}
+                </TableCell>
+                <TableCell className="min-w-[140px]">
+                  {editable ? (
+                    <Select
+                      value={it.status ?? ""}
+                      onValueChange={(v) =>
+                        update.mutate({ id: it.id, status: v || null })
+                      }
+                    >
+                      <SelectTrigger className="h-8">
+                        <SelectValue placeholder="—" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {STATUS_OPTIONS.map((s) => (
+                          <SelectItem key={s} value={s}>
+                            {s}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  ) : (
+                    <span className="text-sm">{it.status ?? "—"}</span>
+                  )}
+                </TableCell>
+                <TableCell className="min-w-[160px]">
+                  {editable ? (
+                    <div className="space-y-0.5">
+                      <Input
+                        type="date"
+                        value={it.validade ?? ""}
+                        onChange={(e) =>
+                          update.mutate({
+                            id: it.id,
+                            validade: e.target.value || null,
+                          })
+                        }
+                        className="h-8"
+                      />
+                      {it.validade && (
+                        <span className="text-xs text-muted-foreground">
+                          {validadeLabel(it.validade)}
+                        </span>
+                      )}
+                    </div>
+                  ) : (
+                    <span className="text-sm">{validadeLabel(it.validade)}</span>
+                  )}
+                </TableCell>
+                <TableCell>
+                  {it.link ? (
+                    <a
+                      href={it.link}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="inline-flex items-center gap-1 text-sm text-primary hover:underline"
+                    >
+                      <ExternalLink className="h-3 w-3" /> abrir
+                    </a>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={() => onOpen(it.id)}
+                      className="text-xs text-muted-foreground hover:text-foreground"
+                    >
+                      adicionar…
+                    </button>
+                  )}
+                </TableCell>
+              </TableRow>
+            );
+          })}
+        </TableBody>
+      </Table>
+    </div>
+  );
+}
