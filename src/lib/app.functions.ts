@@ -235,42 +235,58 @@ export const getListDetail = createServerFn({ method: "GET" })
     const supa = db(context);
     const { data: list, error } = await supa
       .from("lists")
-      .select("id, titulo, area_id, owner_id, archived_at, archived_by, created_at, updated_at, areas:area_id(nome)")
+      .select("id, titulo, tipo, area_id, owner_id, archived_at, archived_by, created_at, updated_at, areas:area_id(nome)")
       .eq("id", data.id)
       .maybeSingle();
     if (error) throw safeDbError(error);
     if (!list) throw new Error("Lista não encontrada");
 
-    const names = await resolveNames(supa, [list.owner_id as string, list.archived_by as string | null]);
-
     const { data: items, error: itemsErr } = await supa
       .from("items")
-      .select("id, texto, proxima_checagem, periodicidade_dias, ordem, archived_at")
+      .select("id, texto, proxima_checagem, periodicidade_dias, ordem, archived_at, responsavel_id, status, validade, link")
       .eq("list_id", data.id)
       .order("archived_at", { ascending: true, nullsFirst: true })
       .order("proxima_checagem", { ascending: true, nullsFirst: false })
       .order("ordem", { ascending: true });
     if (itemsErr) throw safeDbError(itemsErr);
 
+    type ItemRow = {
+      id: string;
+      texto: string;
+      proxima_checagem: string | null;
+      periodicidade_dias: number | null;
+      ordem: number;
+      archived_at: string | null;
+      responsavel_id: string | null;
+      status: string | null;
+      validade: string | null;
+      link: string | null;
+    };
+    const itemRows = (items ?? []) as ItemRow[];
+
+    const names = await resolveNames(supa, [
+      list.owner_id as string,
+      list.archived_by as string | null,
+      ...itemRows.map((i) => i.responsavel_id),
+    ]);
+
     return {
       id: list.id as string,
       titulo: list.titulo as string,
+      tipo: list.tipo as string,
       area_id: list.area_id as string,
       area_nome: (list.areas?.nome as string) ?? "",
       owner_id: list.owner_id as string,
       owner_name: names.get(list.owner_id as string) ?? "—",
       archived_at: (list.archived_at as string | null) ?? null,
       archived_by_name: list.archived_by ? names.get(list.archived_by as string) ?? "—" : null,
-      items: items as {
-        id: string;
-        texto: string;
-        proxima_checagem: string | null;
-        periodicidade_dias: number | null;
-        ordem: number;
-        archived_at: string | null;
-      }[],
+      items: itemRows.map((i) => ({
+        ...i,
+        responsavel_name: i.responsavel_id ? names.get(i.responsavel_id) ?? "—" : null,
+      })),
     };
   });
+
 
 // ============================================================
 // ITEM DETAIL + timeline + tickets
