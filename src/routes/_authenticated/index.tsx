@@ -130,6 +130,7 @@ function HomePage() {
             <h2 className="text-lg font-semibold">{area.nome}</h2>
             <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
               {lists.map((l) => {
+                const isLista = l.tipo === "lista";
                 const sorted = [...l.items].sort(
                   (a, b) => daysUntil(a.proxima_checagem) - daysUntil(b.proxima_checagem),
                 );
@@ -139,12 +140,17 @@ function HomePage() {
                   <Link key={l.id} to="/listas/$id" params={{ id: l.id }} className="block">
                     <Card className="h-full transition hover:border-primary/50 hover:shadow-md">
                       <CardHeader className="pb-2">
-                        <CardTitle className="text-base">{l.titulo}</CardTitle>
+                        <div className="flex items-start justify-between gap-2">
+                          <CardTitle className="text-base">{l.titulo}</CardTitle>
+                          <Badge variant="outline" className="shrink-0 text-[10px] uppercase tracking-wide">
+                            {isLista ? "Lista" : "Checklist"}
+                          </Badge>
+                        </div>
                         <p className="text-xs text-muted-foreground">por {l.owner_name}</p>
                       </CardHeader>
                       <CardContent className="flex flex-wrap gap-2 text-xs">
                         <Badge variant="secondary">{l.items.length} itens</Badge>
-                        {next ? (
+                        {isLista ? null : next ? (
                           <Badge variant="outline" className={bucketClass(nextDays)}>
                             próx.{" "}
                             {nextDays < 0
@@ -161,6 +167,7 @@ function HomePage() {
                   </Link>
                 );
               })}
+
             </div>
           </section>
         ))}
@@ -188,14 +195,16 @@ function NewListDialog({
   const qc = useQueryClient();
   const [titulo, setTitulo] = useState("");
   const [areaId, setAreaId] = useState<string>("");
+  const [tipo, setTipo] = useState<"checklist" | "lista">("checklist");
 
   const m = useMutation({
-    mutationFn: () => create({ data: { titulo, area_id: areaId } }),
+    mutationFn: () => create({ data: { titulo, area_id: areaId, tipo } }),
     onSuccess: (row) => {
       qc.invalidateQueries({ queryKey: ["home"] });
-      toast.success("Lista criada");
+      toast.success("Coleção criada");
       setTitulo("");
       setAreaId("");
+      setTipo("checklist");
       onCreated(row.id);
     },
     onError: (e: Error) => toast.error(e.message),
@@ -204,15 +213,39 @@ function NewListDialog({
   return (
     <DialogContent>
       <DialogHeader>
-        <DialogTitle>Nova lista</DialogTitle>
+        <DialogTitle>Nova coleção</DialogTitle>
       </DialogHeader>
       <div className="space-y-4">
+        <div className="space-y-2">
+          <Label>Tipo</Label>
+          <div className="grid grid-cols-2 gap-2">
+            {(["checklist", "lista"] as const).map((t) => (
+              <button
+                key={t}
+                type="button"
+                onClick={() => setTipo(t)}
+                className={`rounded-md border px-3 py-2 text-left text-sm transition ${
+                  tipo === t
+                    ? "border-primary bg-primary/10"
+                    : "border-input hover:border-primary/40"
+                }`}
+              >
+                <div className="font-medium capitalize">{t}</div>
+              </button>
+            ))}
+          </div>
+          <p className="text-xs text-muted-foreground">
+            {tipo === "checklist"
+              ? "Checklist: rotinas que se repetem em intervalos."
+              : "Lista: controle de documentos/registros sem repetição."}
+          </p>
+        </div>
         <div className="space-y-2">
           <Label>Título</Label>
           <Input
             value={titulo}
             onChange={(e) => setTitulo(e.target.value)}
-            placeholder="Ex.: Checklist envio cliente X"
+            placeholder={tipo === "checklist" ? "Ex.: Checklist envio cliente X" : "Ex.: Contratos vigentes"}
             maxLength={200}
           />
         </div>
@@ -232,6 +265,7 @@ function NewListDialog({
           </Select>
         </div>
       </div>
+
       <DialogFooter>
         <Button
           onClick={() => m.mutate()}
