@@ -310,6 +310,7 @@ function ListDetailPage() {
                     listId={id}
                     draggable={canEditItems}
                     editable={canEditItems}
+                    onOpen={() => setOpenItemId(it.id)}
                   />
                 ))}
               </ul>
@@ -328,13 +329,13 @@ function ListDetailPage() {
                     className="flex items-center gap-2 rounded-md border bg-muted/30 p-3 text-sm"
                   >
                     <Archive className="h-3.5 w-3.5 text-muted-foreground" />
-                    <Link
-                      to="/listas/$id/itens/$itemId"
-                      params={{ id, itemId: it.id }}
-                      className="flex-1 truncate line-through"
+                    <button
+                      type="button"
+                      onClick={() => setOpenItemId(it.id)}
+                      className="flex-1 truncate text-left line-through"
                     >
                       {it.texto}
-                    </Link>
+                    </button>
                     {isOwner && (
                       <UnarchiveItemButton itemId={it.id} listId={id} />
                     )}
@@ -345,6 +346,14 @@ function ListDetailPage() {
           )}
         </>
       )}
+
+      <ItemSheet
+        open={!!openItemId}
+        onOpenChange={(v) => { if (!v) setOpenItemId(null); }}
+        itemId={openItemId}
+        listId={id}
+        canEdit={canEditItems}
+      />
     </div>
   );
 }
