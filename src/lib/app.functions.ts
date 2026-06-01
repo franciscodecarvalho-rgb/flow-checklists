@@ -373,17 +373,24 @@ export const createList = createServerFn({ method: "POST" })
     z.object({
       titulo: z.string().min(1).max(200),
       area_id: z.string().uuid(),
+      tipo: z.enum(["checklist", "lista"]).optional(),
     }).parse(input),
   )
   .handler(async ({ data, context }) => {
     const { data: row, error } = await db(context)
       .from("lists")
-      .insert({ titulo: data.titulo, area_id: data.area_id, owner_id: context.userId })
+      .insert({
+        titulo: data.titulo,
+        area_id: data.area_id,
+        owner_id: context.userId,
+        tipo: data.tipo ?? "checklist",
+      })
       .select("id")
       .single();
     if (error) throw safeDbError(error);
     return row as { id: string };
   });
+
 
 export const updateListTitle = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
