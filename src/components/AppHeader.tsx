@@ -31,6 +31,13 @@ export function AppHeader() {
               >
                 Áreas
               </Link>
+              <Link
+                to="/admin/usuarios"
+                className="text-muted-foreground hover:text-foreground"
+                activeProps={{ className: "text-foreground font-medium" }}
+              >
+                Usuários
+              </Link>
             </nav>
           )}
         </div>

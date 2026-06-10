@@ -15,6 +15,7 @@ import { Route as ForgotPasswordRouteImport } from './routes/forgot-password'
 import { Route as AuthenticatedRouteImport } from './routes/_authenticated'
 import { Route as AuthenticatedIndexRouteImport } from './routes/_authenticated/index'
 import { Route as AuthenticatedListasIdRouteImport } from './routes/_authenticated/listas.$id'
+import { Route as AuthenticatedAdminUsuariosRouteImport } from './routes/_authenticated/admin.usuarios'
 import { Route as AuthenticatedAdminAreasRouteImport } from './routes/_authenticated/admin.areas'
 import { Route as AuthenticatedListasIdItensItemIdRouteImport } from './routes/_authenticated/listas.$id.itens.$itemId'
 
@@ -47,6 +48,12 @@ const AuthenticatedListasIdRoute = AuthenticatedListasIdRouteImport.update({
   path: '/listas/$id',
   getParentRoute: () => AuthenticatedRoute,
 } as any)
+const AuthenticatedAdminUsuariosRoute =
+  AuthenticatedAdminUsuariosRouteImport.update({
+    id: '/admin/usuarios',
+    path: '/admin/usuarios',
+    getParentRoute: () => AuthenticatedRoute,
+  } as any)
 const AuthenticatedAdminAreasRoute = AuthenticatedAdminAreasRouteImport.update({
   id: '/admin/areas',
   path: '/admin/areas',
@@ -65,6 +72,7 @@ export interface FileRoutesByFullPath {
   '/login': typeof LoginRoute
   '/reset-password': typeof ResetPasswordRoute
   '/admin/areas': typeof AuthenticatedAdminAreasRoute
+  '/admin/usuarios': typeof AuthenticatedAdminUsuariosRoute
   '/listas/$id': typeof AuthenticatedListasIdRouteWithChildren
   '/listas/$id/itens/$itemId': typeof AuthenticatedListasIdItensItemIdRoute
 }
@@ -74,6 +82,7 @@ export interface FileRoutesByTo {
   '/reset-password': typeof ResetPasswordRoute
   '/': typeof AuthenticatedIndexRoute
   '/admin/areas': typeof AuthenticatedAdminAreasRoute
+  '/admin/usuarios': typeof AuthenticatedAdminUsuariosRoute
   '/listas/$id': typeof AuthenticatedListasIdRouteWithChildren
   '/listas/$id/itens/$itemId': typeof AuthenticatedListasIdItensItemIdRoute
 }
@@ -85,6 +94,7 @@ export interface FileRoutesById {
   '/reset-password': typeof ResetPasswordRoute
   '/_authenticated/': typeof AuthenticatedIndexRoute
   '/_authenticated/admin/areas': typeof AuthenticatedAdminAreasRoute
+  '/_authenticated/admin/usuarios': typeof AuthenticatedAdminUsuariosRoute
   '/_authenticated/listas/$id': typeof AuthenticatedListasIdRouteWithChildren
   '/_authenticated/listas/$id/itens/$itemId': typeof AuthenticatedListasIdItensItemIdRoute
 }
@@ -96,6 +106,7 @@ export interface FileRouteTypes {
     | '/login'
     | '/reset-password'
     | '/admin/areas'
+    | '/admin/usuarios'
     | '/listas/$id'
     | '/listas/$id/itens/$itemId'
   fileRoutesByTo: FileRoutesByTo
@@ -105,6 +116,7 @@ export interface FileRouteTypes {
     | '/reset-password'
     | '/'
     | '/admin/areas'
+    | '/admin/usuarios'
     | '/listas/$id'
     | '/listas/$id/itens/$itemId'
   id:
@@ -115,6 +127,7 @@ export interface FileRouteTypes {
     | '/reset-password'
     | '/_authenticated/'
     | '/_authenticated/admin/areas'
+    | '/_authenticated/admin/usuarios'
     | '/_authenticated/listas/$id'
     | '/_authenticated/listas/$id/itens/$itemId'
   fileRoutesById: FileRoutesById
@@ -170,6 +183,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthenticatedListasIdRouteImport
       parentRoute: typeof AuthenticatedRoute
     }
+    '/_authenticated/admin/usuarios': {
+      id: '/_authenticated/admin/usuarios'
+      path: '/admin/usuarios'
+      fullPath: '/admin/usuarios'
+      preLoaderRoute: typeof AuthenticatedAdminUsuariosRouteImport
+      parentRoute: typeof AuthenticatedRoute
+    }
     '/_authenticated/admin/areas': {
       id: '/_authenticated/admin/areas'
       path: '/admin/areas'
@@ -203,12 +223,14 @@ const AuthenticatedListasIdRouteWithChildren =
 interface AuthenticatedRouteChildren {
   AuthenticatedIndexRoute: typeof AuthenticatedIndexRoute
   AuthenticatedAdminAreasRoute: typeof AuthenticatedAdminAreasRoute
+  AuthenticatedAdminUsuariosRoute: typeof AuthenticatedAdminUsuariosRoute
   AuthenticatedListasIdRoute: typeof AuthenticatedListasIdRouteWithChildren
 }
 
 const AuthenticatedRouteChildren: AuthenticatedRouteChildren = {
   AuthenticatedIndexRoute: AuthenticatedIndexRoute,
   AuthenticatedAdminAreasRoute: AuthenticatedAdminAreasRoute,
+  AuthenticatedAdminUsuariosRoute: AuthenticatedAdminUsuariosRoute,
   AuthenticatedListasIdRoute: AuthenticatedListasIdRouteWithChildren,
 }
 

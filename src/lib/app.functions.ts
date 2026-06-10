@@ -823,3 +823,114 @@ export const openTicket = createServerFn({ method: "POST" })
     });
     return row as { id: string };
   });
+
+// ============================================================
+// ADMIN: gestão de usuários e senhas
+// ============================================================
+export const adminCreateUser = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((input) =>
+    z.object({
+      email: z.string().email().max(255),
+      full_name: z.string().min(1).max(120),
+      password: z.string().min(8).max(72),
+      is_admin: z.boolean().optional(),
+    }).parse(input),
+  )
+  .handler(async ({ data, context }) => {
+    await assertAdmin(context);
+    if (!/@vitatech\.com\.br$/i.test(data.email)) {
+      throw new Error("Apenas emails @vitatech.com.br podem ser cadastrados");
+    }
+    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+    const { data: created, error } = await supabaseAdmin.auth.admin.createUser({
+      email: data.email,
+      password: data.password,
+      email_confirm: true,
+      user_metadata: { full_name: data.full_name },
+    });
+    if (error) throw new Error(error.message);
+    const newId = created.user?.id;
+    if (!newId) throw new Error("Falha ao criar usuário");
+    // O trigger handle_new_user já cria o profile. Garantimos full_name e is_admin (via admin autenticado).
+    if (data.is_admin) {
+      const { error: updErr } = await db(context)
+        .from("profiles")
+        .update({ full_name: data.full_name, is_admin: true })
+        .eq("id", newId);
+      if (updErr) throw safeDbError(updErr);
+    } else {
+      const { error: updErr } = await db(context)
+        .from("profiles")
+        .update({ full_name: data.full_name })
+        .eq("id", newId);
+      if (updErr) throw safeDbError(updErr);
+    }
+    return { id: newId };
+  });
+
+export const adminUpdateUser = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((input) =>
+    z.object({
+      id: z.string().uuid(),
+      full_name: z.string().min(1).max(120).optional(),
+      is_admin: z.boolean().optional(),
+    }).parse(input),
+  )
+  .handler(async ({ data, context }) => {
+    await assertAdmin(context);
+    if (data.is_admin === false && data.id === context.userId) {
+      throw new Error("Você não pode remover seu próprio acesso de administrador");
+    }
+    const patch: Record<string, unknown> = {};
+    if (data.full_name !== undefined) patch.full_name = data.full_name;
+    if (data.is_admin !== undefined) patch.is_admin = data.is_admin;
+    if (Object.keys(patch).length === 0) return { ok: true };
+    const { error } = await db(context).from("profiles").update(patch).eq("id", data.id);
+    if (error) throw safeDbError(error);
+    return { ok: true };
+  });
+
+export const adminResetPassword = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((input) =>
+    z.object({
+      id: z.string().uuid(),
+      password: z.string().min(8).max(72),
+    }).parse(input),
+  )
+  .handler(async ({ data, context }) => {
+    await assertAdmin(context);
+    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+    const { error } = await supabaseAdmin.auth.admin.updateUserById(data.id, {
+      password: data.password,
+    });
+    if (error) throw new Error(error.message);
+    return { ok: true };
+  });
+
+export const adminDeleteUser = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((input) => z.object({ id: z.string().uuid() }).parse(input))
+  .handler(async ({ data, context }) => {
+    await assertAdmin(context);
+    if (data.id === context.userId) {
+      throw new Error("Você não pode excluir sua própria conta");
+    }
+    const supa = db(context);
+    const { count, error: countErr } = await supa
+      .from("lists")
+      .select("id", { count: "exact", head: true })
+      .eq("owner_id", data.id);
+    if (countErr) throw safeDbError(countErr);
+    if ((count ?? 0) > 0) {
+      throw new Error(
+        `Transfira as ${count} listas deste usuário antes de excluí-lo`,
+      );
+    }
+    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+    const { error } = await supabaseAdmin.auth.admin.deleteUser(data.id);
+    if (error) throw new Error(error.message);
+    return { ok: true };
+  });
