@@ -309,7 +309,7 @@ function ItemSheetBody({
             <SelectContent>
               {(usersQ.data ?? []).map((u) => (
                 <SelectItem key={u.id} value={u.id}>
-                  {u.full_name || u.email}
+                  {u.display_name}
                 </SelectItem>
               ))}
             </SelectContent>
