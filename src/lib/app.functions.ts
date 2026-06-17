@@ -162,13 +162,19 @@ export const listUsers = createServerFn({ method: "GET" })
 
 export const listProfiles = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
-  .handler(async ({ context }) => {
-    const { data, error } = await db(context)
+  .handler(async () => {
+    // Picking a "responsável" needs to see all colleagues, but we don't want
+    // to expose raw emails / admin flags through RLS. Resolve cross-user data
+    // server-side and only return id + display name.
+    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+    const { data, error } = await supabaseAdmin
       .from("profiles")
       .select("id, full_name, email")
       .order("full_name", { ascending: true });
     if (error) throw safeDbError(error);
-    return data as { id: string; full_name: string | null; email: string }[];
+    return ((data ?? []) as { id: string; full_name: string | null; email: string }[]).map(
+      (r) => ({ id: r.id, display_name: r.full_name?.trim() || r.email.split("@")[0] }),
+    );
   });
 
 // ============================================================
