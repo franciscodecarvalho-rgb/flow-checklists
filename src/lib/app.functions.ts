@@ -48,18 +48,21 @@ async function assertAdmin(ctx: { supabase: unknown; userId: string }): Promise<
 }
 
 async function resolveNames(
-  supa: any,
+  _supa: any,
   ids: (string | null | undefined)[],
 ): Promise<Map<string, string>> {
   const unique = Array.from(new Set(ids.filter((x): x is string => !!x)));
   if (unique.length === 0) return new Map();
-  const { data, error } = await supa
+  // Cross-user lookup goes through the admin client so we don't need to expose
+  // every profile row via RLS. Only the computed display name is returned to clients.
+  const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+  const { data, error } = await supabaseAdmin
     .from("profiles")
     .select("id, full_name, email")
     .in("id", unique);
   if (error) throw safeDbError(error);
   const map = new Map<string, string>();
-  for (const r of data as { id: string; full_name: string | null; email: string }[]) {
+  for (const r of (data ?? []) as { id: string; full_name: string | null; email: string }[]) {
     map.set(r.id, r.full_name?.trim() || r.email);
   }
   return map;
