@@ -77,6 +77,39 @@ export type Database = {
           },
         ]
       }
+      item_favorites: {
+        Row: {
+          created_at: string
+          item_id: string
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          item_id: string
+          user_id: string
+        }
+        Update: {
+          created_at?: string
+          item_id?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "item_favorites_item_id_fkey"
+            columns: ["item_id"]
+            isOneToOne: false
+            referencedRelation: "items"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "item_favorites_user_id_fkey"
+            columns: ["user_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       item_tickets: {
         Row: {
           created_at: string
@@ -117,11 +150,13 @@ export type Database = {
           archived_at: string | null
           archived_by: string | null
           created_at: string
+          envolvido_id: string | null
           id: string
           link: string | null
           list_id: string
           ordem: number
           periodicidade_dias: number | null
+          prioridade: string
           proxima_checagem: string | null
           responsavel_id: string | null
           status: string | null
@@ -133,11 +168,13 @@ export type Database = {
           archived_at?: string | null
           archived_by?: string | null
           created_at?: string
+          envolvido_id?: string | null
           id?: string
           link?: string | null
           list_id: string
           ordem?: number
           periodicidade_dias?: number | null
+          prioridade?: string
           proxima_checagem?: string | null
           responsavel_id?: string | null
           status?: string | null
@@ -149,11 +186,13 @@ export type Database = {
           archived_at?: string | null
           archived_by?: string | null
           created_at?: string
+          envolvido_id?: string | null
           id?: string
           link?: string | null
           list_id?: string
           ordem?: number
           periodicidade_dias?: number | null
+          prioridade?: string
           proxima_checagem?: string | null
           responsavel_id?: string | null
           status?: string | null
@@ -165,6 +204,13 @@ export type Database = {
           {
             foreignKeyName: "items_archived_by_fkey"
             columns: ["archived_by"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "items_envolvido_id_fkey"
+            columns: ["envolvido_id"]
             isOneToOne: false
             referencedRelation: "profiles"
             referencedColumns: ["id"]
