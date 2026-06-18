@@ -14,6 +14,7 @@ import { Route as LoginRouteImport } from './routes/login'
 import { Route as ForgotPasswordRouteImport } from './routes/forgot-password'
 import { Route as AuthenticatedRouteImport } from './routes/_authenticated'
 import { Route as AuthenticatedIndexRouteImport } from './routes/_authenticated/index'
+import { Route as AuthenticatedTudoRouteImport } from './routes/_authenticated/tudo'
 import { Route as AuthenticatedListasIdRouteImport } from './routes/_authenticated/listas.$id'
 import { Route as AuthenticatedAdminUsuariosRouteImport } from './routes/_authenticated/admin.usuarios'
 import { Route as AuthenticatedAdminAreasRouteImport } from './routes/_authenticated/admin.areas'
@@ -41,6 +42,11 @@ const AuthenticatedRoute = AuthenticatedRouteImport.update({
 const AuthenticatedIndexRoute = AuthenticatedIndexRouteImport.update({
   id: '/',
   path: '/',
+  getParentRoute: () => AuthenticatedRoute,
+} as any)
+const AuthenticatedTudoRoute = AuthenticatedTudoRouteImport.update({
+  id: '/tudo',
+  path: '/tudo',
   getParentRoute: () => AuthenticatedRoute,
 } as any)
 const AuthenticatedListasIdRoute = AuthenticatedListasIdRouteImport.update({
@@ -71,6 +77,7 @@ export interface FileRoutesByFullPath {
   '/forgot-password': typeof ForgotPasswordRoute
   '/login': typeof LoginRoute
   '/reset-password': typeof ResetPasswordRoute
+  '/tudo': typeof AuthenticatedTudoRoute
   '/admin/areas': typeof AuthenticatedAdminAreasRoute
   '/admin/usuarios': typeof AuthenticatedAdminUsuariosRoute
   '/listas/$id': typeof AuthenticatedListasIdRouteWithChildren
@@ -80,6 +87,7 @@ export interface FileRoutesByTo {
   '/forgot-password': typeof ForgotPasswordRoute
   '/login': typeof LoginRoute
   '/reset-password': typeof ResetPasswordRoute
+  '/tudo': typeof AuthenticatedTudoRoute
   '/': typeof AuthenticatedIndexRoute
   '/admin/areas': typeof AuthenticatedAdminAreasRoute
   '/admin/usuarios': typeof AuthenticatedAdminUsuariosRoute
@@ -92,6 +100,7 @@ export interface FileRoutesById {
   '/forgot-password': typeof ForgotPasswordRoute
   '/login': typeof LoginRoute
   '/reset-password': typeof ResetPasswordRoute
+  '/_authenticated/tudo': typeof AuthenticatedTudoRoute
   '/_authenticated/': typeof AuthenticatedIndexRoute
   '/_authenticated/admin/areas': typeof AuthenticatedAdminAreasRoute
   '/_authenticated/admin/usuarios': typeof AuthenticatedAdminUsuariosRoute
@@ -105,6 +114,7 @@ export interface FileRouteTypes {
     | '/forgot-password'
     | '/login'
     | '/reset-password'
+    | '/tudo'
     | '/admin/areas'
     | '/admin/usuarios'
     | '/listas/$id'
@@ -114,6 +124,7 @@ export interface FileRouteTypes {
     | '/forgot-password'
     | '/login'
     | '/reset-password'
+    | '/tudo'
     | '/'
     | '/admin/areas'
     | '/admin/usuarios'
@@ -125,6 +136,7 @@ export interface FileRouteTypes {
     | '/forgot-password'
     | '/login'
     | '/reset-password'
+    | '/_authenticated/tudo'
     | '/_authenticated/'
     | '/_authenticated/admin/areas'
     | '/_authenticated/admin/usuarios'
@@ -176,6 +188,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthenticatedIndexRouteImport
       parentRoute: typeof AuthenticatedRoute
     }
+    '/_authenticated/tudo': {
+      id: '/_authenticated/tudo'
+      path: '/tudo'
+      fullPath: '/tudo'
+      preLoaderRoute: typeof AuthenticatedTudoRouteImport
+      parentRoute: typeof AuthenticatedRoute
+    }
     '/_authenticated/listas/$id': {
       id: '/_authenticated/listas/$id'
       path: '/listas/$id'
@@ -221,6 +240,7 @@ const AuthenticatedListasIdRouteWithChildren =
   )
 
 interface AuthenticatedRouteChildren {
+  AuthenticatedTudoRoute: typeof AuthenticatedTudoRoute
   AuthenticatedIndexRoute: typeof AuthenticatedIndexRoute
   AuthenticatedAdminAreasRoute: typeof AuthenticatedAdminAreasRoute
   AuthenticatedAdminUsuariosRoute: typeof AuthenticatedAdminUsuariosRoute
@@ -228,6 +248,7 @@ interface AuthenticatedRouteChildren {
 }
 
 const AuthenticatedRouteChildren: AuthenticatedRouteChildren = {
+  AuthenticatedTudoRoute: AuthenticatedTudoRoute,
   AuthenticatedIndexRoute: AuthenticatedIndexRoute,
   AuthenticatedAdminAreasRoute: AuthenticatedAdminAreasRoute,
   AuthenticatedAdminUsuariosRoute: AuthenticatedAdminUsuariosRoute,
@@ -247,3 +268,13 @@ const rootRouteChildren: RootRouteChildren = {
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)
   ._addFileTypes<FileRouteTypes>()
+
+import type { getRouter } from './router.tsx'
+import type { startInstance } from './start.ts'
+declare module '@tanstack/react-start' {
+  interface Register {
+    ssr: true
+    router: Awaited<ReturnType<typeof getRouter>>
+    config: Awaited<ReturnType<typeof startInstance.getOptions>>
+  }
+}

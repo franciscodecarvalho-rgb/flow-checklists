@@ -265,7 +265,7 @@ export const getListDetail = createServerFn({ method: "GET" })
 
     const { data: items, error: itemsErr } = await supa
       .from("items")
-      .select("id, texto, proxima_checagem, periodicidade_dias, ordem, archived_at, responsavel_id, status, validade, link")
+      .select("id, texto, proxima_checagem, periodicidade_dias, ordem, archived_at, responsavel_id, envolvido_id, prioridade, status, validade, link")
       .eq("list_id", data.id)
       .order("archived_at", { ascending: true, nullsFirst: true })
       .order("proxima_checagem", { ascending: true, nullsFirst: false })
@@ -296,16 +296,32 @@ export const getListDetail = createServerFn({ method: "GET" })
       ordem: number;
       archived_at: string | null;
       responsavel_id: string | null;
+      envolvido_id: string | null;
+      prioridade: string;
       status: string | null;
       validade: string | null;
       link: string | null;
     };
     const itemRows = (items ?? []) as ItemRow[];
 
+    // Favoritos do usuário atual entre os itens desta lista.
+    const itemIds = itemRows.map((i) => i.id);
+    let favSet = new Set<string>();
+    if (itemIds.length) {
+      const { data: favs, error: favErr } = await supa
+        .from("item_favorites")
+        .select("item_id")
+        .eq("user_id", context.userId)
+        .in("item_id", itemIds);
+      if (favErr) throw safeDbError(favErr);
+      favSet = new Set((favs ?? []).map((f: { item_id: string }) => f.item_id));
+    }
+
     const names = await resolveNames(supa, [
       list.owner_id as string,
       list.archived_by as string | null,
       ...itemRows.map((i) => i.responsavel_id),
+      ...itemRows.map((i) => i.envolvido_id),
       ...eventRows.map((e) => e.author_id),
       ...eventRows.map((e) => e.payload?.from ?? null),
       ...eventRows.map((e) => e.payload?.to ?? null),
@@ -324,6 +340,8 @@ export const getListDetail = createServerFn({ method: "GET" })
       items: itemRows.map((i) => ({
         ...i,
         responsavel_name: i.responsavel_id ? names.get(i.responsavel_id) ?? "—" : null,
+        envolvido_name: i.envolvido_id ? names.get(i.envolvido_id) ?? "—" : null,
+        favorito: favSet.has(i.id),
       })),
       events: eventRows.map((e) => ({
         id: e.id,
@@ -349,12 +367,19 @@ export const getItemDetail = createServerFn({ method: "GET" })
     const { data: item, error } = await supa
       .from("items")
       .select(
-        "id, texto, proxima_checagem, periodicidade_dias, ordem, archived_at, archived_by, list_id, responsavel_id, status, validade, link, lists:list_id(id, titulo, owner_id, tipo)",
+        "id, texto, proxima_checagem, periodicidade_dias, ordem, archived_at, archived_by, list_id, responsavel_id, envolvido_id, prioridade, status, validade, link, lists:list_id(id, titulo, owner_id, tipo)",
       )
       .eq("id", data.id)
       .maybeSingle();
     if (error) throw safeDbError(error);
     if (!item) throw new Error("Item não encontrado");
+
+    const { data: favRow } = await supa
+      .from("item_favorites")
+      .select("item_id")
+      .eq("user_id", context.userId)
+      .eq("item_id", data.id)
+      .maybeSingle();
 
     const [eventsRes, ticketsRes] = await Promise.all([
       supa
@@ -384,6 +409,7 @@ export const getItemDetail = createServerFn({ method: "GET" })
       item.archived_by as string | null,
       (item.lists?.owner_id as string) ?? null,
       item.responsavel_id as string | null,
+      item.envolvido_id as string | null,
     ];
     const names = await resolveNames(supa, ids);
 
@@ -403,6 +429,12 @@ export const getItemDetail = createServerFn({ method: "GET" })
       responsavel_name: item.responsavel_id
         ? names.get(item.responsavel_id as string) ?? "—"
         : null,
+      envolvido_id: (item.envolvido_id as string | null) ?? null,
+      envolvido_name: item.envolvido_id
+        ? names.get(item.envolvido_id as string) ?? "—"
+        : null,
+      prioridade: (item.prioridade as string) ?? "media",
+      favorito: !!favRow,
       status: (item.status as string | null) ?? null,
       validade: (item.validade as string | null) ?? null,
       link: (item.link as string | null) ?? null,
@@ -561,6 +593,8 @@ export const createItem = createServerFn({ method: "POST" })
       proxima_checagem: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
       periodicidade_dias: z.number().int().positive().max(3650).nullable().optional(),
       responsavel_id: z.string().uuid().nullable().optional(),
+      envolvido_id: z.string().uuid().nullable().optional(),
+      prioridade: z.enum(["alta", "media", "baixa"]).optional(),
       status: z.string().max(60).nullable().optional(),
       validade: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullable().optional(),
       link: z.string().max(2000).nullable().optional(),
@@ -600,6 +634,8 @@ export const createItem = createServerFn({ method: "POST" })
         proxima_checagem: proxima,
         periodicidade_dias: data.periodicidade_dias ?? null,
         responsavel_id: responsavel,
+        envolvido_id: data.envolvido_id ?? null,
+        prioridade: data.prioridade ?? "media",
         status: data.status ?? null,
         validade: data.validade ?? null,
         link: data.link ?? null,
@@ -617,6 +653,8 @@ export const updateItemFields = createServerFn({ method: "POST" })
       id: z.string().uuid(),
       texto: z.string().min(1).max(500).optional(),
       responsavel_id: z.string().uuid().nullable().optional(),
+      envolvido_id: z.string().uuid().nullable().optional(),
+      prioridade: z.enum(["alta", "media", "baixa"]).optional(),
       status: z.string().max(60).nullable().optional(),
       validade: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullable().optional(),
       link: z.string().max(2000).nullable().optional(),
@@ -626,14 +664,14 @@ export const updateItemFields = createServerFn({ method: "POST" })
     const supa = db(context);
     const { id, ...rest } = data;
     const patch: Record<string, unknown> = {};
-    for (const k of ["texto", "responsavel_id", "status", "validade", "link"] as const) {
+    for (const k of ["texto", "responsavel_id", "envolvido_id", "prioridade", "status", "validade", "link"] as const) {
       if (rest[k] !== undefined) patch[k] = rest[k];
     }
     if (Object.keys(patch).length === 0) return { ok: true };
 
     const { data: prev, error: prevErr } = await supa
       .from("items")
-      .select("texto, responsavel_id, status, validade, link")
+      .select("texto, responsavel_id, envolvido_id, prioridade, status, validade, link")
       .eq("id", id)
       .maybeSingle();
     if (prevErr) throw safeDbError(prevErr);
@@ -880,6 +918,132 @@ export const openTicket = createServerFn({ method: "POST" })
       payload: { ticket_code: data.ticket_code, ticket_status: data.ticket_status ?? null },
     });
     return row as { id: string };
+  });
+
+// ============================================================
+// FAVORITOS (por usuário)
+// ============================================================
+export const toggleFavorite = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((input) =>
+    z.object({
+      item_id: z.string().uuid(),
+      favorito: z.boolean(),
+    }).parse(input),
+  )
+  .handler(async ({ data, context }) => {
+    const supa = db(context);
+    if (data.favorito) {
+      const { error } = await supa
+        .from("item_favorites")
+        .upsert(
+          { user_id: context.userId, item_id: data.item_id },
+          { onConflict: "user_id,item_id", ignoreDuplicates: true },
+        );
+      if (error) throw safeDbError(error);
+    } else {
+      const { error } = await supa
+        .from("item_favorites")
+        .delete()
+        .eq("user_id", context.userId)
+        .eq("item_id", data.item_id);
+      if (error) throw safeDbError(error);
+    }
+    return { ok: true, favorito: data.favorito };
+  });
+
+// ============================================================
+// TUDO — todos os itens ativos de listas ativas (visão global)
+// ============================================================
+export const listAllItems = createServerFn({ method: "GET" })
+  .middleware([requireSupabaseAuth])
+  .handler(async ({ context }) => {
+    const supa = db(context);
+    const [itemsRes, listsRes, areasRes, favRes] = await Promise.all([
+      supa
+        .from("items")
+        .select(
+          "id, list_id, texto, proxima_checagem, prioridade, status, validade, link, responsavel_id, envolvido_id",
+        )
+        .is("archived_at", null),
+      supa
+        .from("lists")
+        .select("id, titulo, tipo, area_id, owner_id")
+        .is("archived_at", null),
+      supa.from("areas").select("id, nome, ordem").order("ordem").order("nome"),
+      supa.from("item_favorites").select("item_id").eq("user_id", context.userId),
+    ]);
+    if (itemsRes.error) throw safeDbError(itemsRes.error);
+    if (listsRes.error) throw safeDbError(listsRes.error);
+    if (areasRes.error) throw safeDbError(areasRes.error);
+    if (favRes.error) throw safeDbError(favRes.error);
+
+    type ItemRow = {
+      id: string;
+      list_id: string;
+      texto: string;
+      proxima_checagem: string | null;
+      prioridade: string;
+      status: string | null;
+      validade: string | null;
+      link: string | null;
+      responsavel_id: string | null;
+      envolvido_id: string | null;
+    };
+    type ListRow = {
+      id: string;
+      titulo: string;
+      tipo: string;
+      area_id: string;
+      owner_id: string;
+    };
+    const items = (itemsRes.data ?? []) as ItemRow[];
+    const lists = (listsRes.data ?? []) as ListRow[];
+    const areas = (areasRes.data ?? []) as { id: string; nome: string; ordem: number }[];
+
+    const listById = new Map(lists.map((l) => [l.id, l] as const));
+    const areaById = new Map(areas.map((a) => [a.id, a] as const));
+    const favSet = new Set(
+      ((favRes.data ?? []) as { item_id: string }[]).map((f) => f.item_id),
+    );
+
+    // Só itens cuja lista está ativa (não arquivada).
+    const visible = items.filter((i) => listById.has(i.list_id));
+
+    const names = await resolveNames(supa, [
+      ...visible.map((i) => i.responsavel_id),
+      ...visible.map((i) => i.envolvido_id),
+      ...lists.map((l) => l.owner_id),
+    ]);
+
+    return {
+      areas: areas.map((a) => ({ id: a.id, nome: a.nome })),
+      items: visible.map((i) => {
+        const l = listById.get(i.list_id)!;
+        const a = areaById.get(l.area_id);
+        return {
+          id: i.id,
+          list_id: i.list_id,
+          list_titulo: l.titulo,
+          list_tipo: l.tipo,
+          list_owner_id: l.owner_id,
+          area_id: l.area_id,
+          area_nome: a?.nome ?? "—",
+          texto: i.texto,
+          prioridade: i.prioridade,
+          proxima_checagem: i.proxima_checagem,
+          validade: i.validade,
+          link: i.link,
+          responsavel_id: i.responsavel_id,
+          responsavel_name: i.responsavel_id
+            ? names.get(i.responsavel_id) ?? "—"
+            : names.get(l.owner_id) ?? "—",
+          envolvido_id: i.envolvido_id,
+          envolvido_name: i.envolvido_id ? names.get(i.envolvido_id) ?? "—" : null,
+          favorito: favSet.has(i.id),
+        };
+      }),
+    };
   });
 
 // ============================================================

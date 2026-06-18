@@ -22,24 +22,33 @@ export function AppHeader() {
           <Link to="/" className="text-lg font-semibold">
             Listas e Checklists
           </Link>
-          {profile?.is_admin && (
-            <nav className="hidden gap-4 text-sm md:flex">
-              <Link
-                to="/admin/areas"
-                className="text-muted-foreground hover:text-foreground"
-                activeProps={{ className: "text-foreground font-medium" }}
-              >
-                Áreas
-              </Link>
-              <Link
-                to="/admin/usuarios"
-                className="text-muted-foreground hover:text-foreground"
-                activeProps={{ className: "text-foreground font-medium" }}
-              >
-                Usuários
-              </Link>
-            </nav>
-          )}
+          <nav className="hidden gap-4 text-sm md:flex">
+            <Link
+              to="/tudo"
+              className="text-muted-foreground hover:text-foreground"
+              activeProps={{ className: "text-foreground font-medium" }}
+            >
+              Tudo
+            </Link>
+            {profile?.is_admin && (
+              <>
+                <Link
+                  to="/admin/areas"
+                  className="text-muted-foreground hover:text-foreground"
+                  activeProps={{ className: "text-foreground font-medium" }}
+                >
+                  Áreas
+                </Link>
+                <Link
+                  to="/admin/usuarios"
+                  className="text-muted-foreground hover:text-foreground"
+                  activeProps={{ className: "text-foreground font-medium" }}
+                >
+                  Usuários
+                </Link>
+              </>
+            )}
+          </nav>
         </div>
         <div className="flex items-center gap-3">
           {profile?.is_admin && (

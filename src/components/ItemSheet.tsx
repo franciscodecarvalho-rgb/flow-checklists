@@ -11,6 +11,7 @@ import {
   Pencil,
   Plus,
   RefreshCw,
+  Star,
   Ticket,
 } from "lucide-react";
 import {
@@ -21,9 +22,11 @@ import {
   updateItemSchedule,
   archiveItem,
   unarchiveItem,
+  toggleFavorite,
   listProfiles,
   type ItemEventType,
 } from "@/lib/app.functions";
+import { statusFromPrazo, PRIORIDADE_OPTIONS } from "@/lib/item-display";
 import {
   Sheet,
   SheetContent,
@@ -104,6 +107,7 @@ function ItemSheetBody({
   const updSched = useServerFn(updateItemSchedule);
   const archI = useServerFn(archiveItem);
   const unarchI = useServerFn(unarchiveItem);
+  const fav = useServerFn(toggleFavorite);
   const profilesFn = useServerFn(listProfiles);
 
   const q = useQuery({
@@ -120,7 +124,14 @@ function ItemSheetBody({
     qc.invalidateQueries({ queryKey: ["item", itemId] });
     qc.invalidateQueries({ queryKey: ["list", listId] });
     qc.invalidateQueries({ queryKey: ["home"] });
+    qc.invalidateQueries({ queryKey: ["all-items"] });
   };
+
+  const favM = useMutation({
+    mutationFn: (favorito: boolean) => fav({ data: { item_id: itemId, favorito } }),
+    onSuccess: () => invalidate(),
+    onError: (e: Error) => toast.error(e.message),
+  });
 
   // --- mutations ---
   const addComment = useMutation({
@@ -147,7 +158,8 @@ function ItemSheetBody({
     id: string;
     texto?: string;
     responsavel_id?: string | null;
-    status?: string | null;
+    envolvido_id?: string | null;
+    prioridade?: "alta" | "media" | "baixa";
     validade?: string | null;
     link?: string | null;
   };
@@ -193,7 +205,8 @@ function ItemSheetBody({
   // --- form state, hydrated from data ---
   const [texto, setTexto] = useState("");
   const [responsavelId, setResponsavelId] = useState<string>("");
-  const [status, setStatus] = useState("");
+  const [envolvidoId, setEnvolvidoId] = useState<string>("");
+  const [prioridade, setPrioridade] = useState<"alta" | "media" | "baixa">("media");
   const [validade, setValidade] = useState("");
   const [link, setLink] = useState("");
   const [proxima, setProxima] = useState("");
@@ -211,7 +224,8 @@ function ItemSheetBody({
     if (q.data) {
       setTexto(q.data.texto);
       setResponsavelId(q.data.responsavel_id ?? q.data.list_owner_id ?? "");
-      setStatus(q.data.status ?? "");
+      setEnvolvidoId(q.data.envolvido_id ?? "");
+      setPrioridade((q.data.prioridade as "alta" | "media" | "baixa") ?? "media");
       setValidade(q.data.validade ?? "");
       setLink(q.data.link ?? "");
       setProxima(q.data.proxima_checagem ?? "");
@@ -244,9 +258,10 @@ function ItemSheetBody({
     if (texto.trim() && texto !== q.data!.texto) patch.texto = texto.trim();
     const newResp = responsavelId || null;
     if (newResp !== q.data!.responsavel_id) patch.responsavel_id = newResp;
+    const newEnv = envolvidoId || null;
+    if (newEnv !== q.data!.envolvido_id) patch.envolvido_id = newEnv;
+    if (prioridade !== q.data!.prioridade) patch.prioridade = prioridade;
     if (isLista) {
-      const ns = status.trim() || null;
-      if (ns !== q.data!.status) patch.status = ns;
       const nv = validade || null;
       if (nv !== q.data!.validade) patch.validade = nv;
       const nl = link.trim() || null;
@@ -280,6 +295,18 @@ function ItemSheetBody({
           {!isArchived && !isLista && q.data.proxima_checagem && (
             <Badge variant="secondary">próx.: {q.data.proxima_checagem}</Badge>
           )}
+          <button
+            type="button"
+            onClick={() => favM.mutate(!q.data!.favorito)}
+            disabled={favM.isPending}
+            className="ml-auto text-muted-foreground transition hover:text-amber-500"
+            title={q.data.favorito ? "Remover dos favoritos" : "Adicionar aos favoritos"}
+            aria-label="Favoritar"
+          >
+            <Star
+              className={`h-5 w-5 ${q.data.favorito ? "fill-amber-400 text-amber-400" : ""}`}
+            />
+          </button>
         </div>
         <SheetTitle className="text-left text-lg">{q.data.texto}</SheetTitle>
       </SheetHeader>
@@ -321,17 +348,64 @@ function ItemSheetBody({
           )}
         </div>
 
+        <div className="space-y-2">
+          <Label>Envolvido</Label>
+          <Select
+            value={envolvidoId || "__none__"}
+            onValueChange={(v) => setEnvolvidoId(v === "__none__" ? "" : v)}
+            disabled={!canEdit}
+          >
+            <SelectTrigger>
+              <SelectValue placeholder="Selecionar…" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="__none__">— ninguém —</SelectItem>
+              {(usersQ.data ?? []).map((u) => (
+                <SelectItem key={u.id} value={u.id}>
+                  {u.display_name}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          {q.data.envolvido_name && (
+            <p className="text-xs text-muted-foreground">
+              Atual: {q.data.envolvido_name}
+            </p>
+          )}
+        </div>
+
+        <div className="space-y-2">
+          <Label>Prioridade de monitoramento</Label>
+          <Select
+            value={prioridade}
+            onValueChange={(v) => setPrioridade(v as "alta" | "media" | "baixa")}
+            disabled={!canEdit}
+          >
+            <SelectTrigger>
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {PRIORIDADE_OPTIONS.map((p) => (
+                <SelectItem key={p.value} value={p.value}>
+                  {p.label}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+
         {isLista ? (
           <>
             <div className="space-y-2">
-              <Label>Status</Label>
-              <Input
-                value={status}
-                onChange={(e) => setStatus(e.target.value)}
-                disabled={!canEdit}
-                maxLength={60}
-                placeholder="Ex.: vigente, vencido…"
-              />
+              <Label>Status (calculado)</Label>
+              <div>
+                <Badge variant="outline" className={statusFromPrazo(validade || null).className}>
+                  {statusFromPrazo(validade || null).label}
+                </Badge>
+                <p className="mt-1 text-xs text-muted-foreground">
+                  Definido automaticamente pelo Prazo.
+                </p>
+              </div>
             </div>
             <div className="space-y-2">
               <Label>Prazo</Label>

@@ -13,6 +13,7 @@ import {
   MoreHorizontal,
   Pencil,
   Plus,
+  Star,
   UserCog,
 } from "lucide-react";
 import {
@@ -46,10 +47,16 @@ import {
   unarchiveList,
   updateListTitle,
   transferList,
+  toggleFavorite,
   listUsers,
   listProfiles,
   listAreas,
 } from "@/lib/app.functions";
+import {
+  statusFromPrazo,
+  prioridadeInfo,
+  PRIORIDADE_OPTIONS,
+} from "@/lib/item-display";
 import { ItemSheet } from "@/components/ItemSheet";
 import {
   Table,
@@ -101,12 +108,14 @@ type Item = {
   archived_at: string | null;
   responsavel_id: string | null;
   responsavel_name: string | null;
+  envolvido_id: string | null;
+  envolvido_name: string | null;
+  prioridade: string;
   status: string | null;
   validade: string | null;
   link: string | null;
+  favorito: boolean;
 };
-
-const STATUS_OPTIONS = ["Vigente", "A renovar", "Vencido", "Em elaboração"] as const;
 
 function daysUntil(dateStr: string | null | undefined): number {
   if (!dateStr) return Number.POSITIVE_INFINITY;
@@ -167,7 +176,8 @@ function ListDetailPage() {
   type NewItemInput = {
     texto: string;
     responsavel_id?: string | null;
-    status?: string | null;
+    envolvido_id?: string | null;
+    prioridade?: "alta" | "media" | "baixa";
     validade?: string | null;
     link?: string | null;
   };
@@ -1050,7 +1060,8 @@ function NewListaItemForm({
   onSubmit: (p: {
     texto: string;
     responsavel_id?: string | null;
-    status?: string | null;
+    envolvido_id?: string | null;
+    prioridade?: "alta" | "media" | "baixa";
     validade?: string | null;
     link?: string | null;
   }) => void;
@@ -1059,7 +1070,8 @@ function NewListaItemForm({
   const usersQ = useQuery({ queryKey: ["profiles"], queryFn: () => profilesFn() });
   const [texto, setTexto] = useState("");
   const [responsavelId, setResponsavelId] = useState<string>(ownerId);
-  const [status, setStatus] = useState<string>("");
+  const [envolvidoId, setEnvolvidoId] = useState<string>("");
+  const [prioridade, setPrioridade] = useState<"alta" | "media" | "baixa">("media");
   const [validade, setValidade] = useState("");
   const [link, setLink] = useState("");
 
@@ -1071,12 +1083,14 @@ function NewListaItemForm({
         onSubmit({
           texto: texto.trim(),
           responsavel_id: responsavelId || null,
-          status: status || null,
+          envolvido_id: envolvidoId || null,
+          prioridade,
           validade: validade || null,
           link: link.trim() || null,
         });
         setTexto("");
-        setStatus("");
+        setEnvolvidoId("");
+        setPrioridade("media");
         setValidade("");
         setLink("");
         setResponsavelId(ownerId);
@@ -1109,15 +1123,37 @@ function NewListaItemForm({
           </Select>
         </div>
         <div className="space-y-1">
-          <Label>Status</Label>
-          <Select value={status} onValueChange={setStatus}>
+          <Label>Envolvido</Label>
+          <Select
+            value={envolvidoId || "__none__"}
+            onValueChange={(v) => setEnvolvidoId(v === "__none__" ? "" : v)}
+          >
             <SelectTrigger>
               <SelectValue placeholder="—" />
             </SelectTrigger>
             <SelectContent>
-              {STATUS_OPTIONS.map((s) => (
-                <SelectItem key={s} value={s}>
-                  {s}
+              <SelectItem value="__none__">— ninguém —</SelectItem>
+              {(usersQ.data ?? []).map((u) => (
+                <SelectItem key={u.id} value={u.id}>
+                  {u.display_name}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+        <div className="space-y-1">
+          <Label>Prioridade</Label>
+          <Select
+            value={prioridade}
+            onValueChange={(v) => setPrioridade(v as "alta" | "media" | "baixa")}
+          >
+            <SelectTrigger>
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {PRIORIDADE_OPTIONS.map((p) => (
+                <SelectItem key={p.value} value={p.value}>
+                  {p.label}
                 </SelectItem>
               ))}
             </SelectContent>
@@ -1160,13 +1196,15 @@ function ListaTable({
   const qc = useQueryClient();
   const profilesFn = useServerFn(listProfiles);
   const updFields = useServerFn(updateItemFields);
+  const fav = useServerFn(toggleFavorite);
   const usersQ = useQuery({ queryKey: ["profiles"], queryFn: () => profilesFn() });
 
   const update = useMutation({
     mutationFn: (p: {
       id: string;
       responsavel_id?: string | null;
-      status?: string | null;
+      envolvido_id?: string | null;
+      prioridade?: "alta" | "media" | "baixa";
       validade?: string | null;
       link?: string | null;
     }) => updFields({ data: p }),
@@ -1177,16 +1215,28 @@ function ListaTable({
     onError: (e: Error) => toast.error(e.message),
   });
 
+  const favM = useMutation({
+    mutationFn: (p: { item_id: string; favorito: boolean }) => fav({ data: p }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["list"] });
+      qc.invalidateQueries({ queryKey: ["all-items"] });
+    },
+    onError: (e: Error) => toast.error(e.message),
+  });
+
   return (
     <div className="overflow-x-auto rounded-md border bg-card">
       <Table>
         <TableHeader>
           <TableRow>
-            <TableHead className="w-[32%]">Item</TableHead>
+            <TableHead className="w-[24%]">Item</TableHead>
             <TableHead>Responsável</TableHead>
+            <TableHead>Envolvido</TableHead>
+            <TableHead>Prioridade</TableHead>
             <TableHead>Status</TableHead>
             <TableHead>Prazo</TableHead>
             <TableHead>Link</TableHead>
+            <TableHead className="w-10 text-center">★</TableHead>
           </TableRow>
         </TableHeader>
         <TableBody>
@@ -1226,28 +1276,71 @@ function ListaTable({
                     <span className="text-sm">{respName}</span>
                   )}
                 </TableCell>
-                <TableCell className="min-w-[140px]">
+                <TableCell className="min-w-[160px]">
                   {editable ? (
                     <Select
-                      value={it.status ?? ""}
+                      value={it.envolvido_id ?? "__none__"}
                       onValueChange={(v) =>
-                        update.mutate({ id: it.id, status: v || null })
+                        update.mutate({
+                          id: it.id,
+                          envolvido_id: v === "__none__" ? null : v,
+                        })
                       }
                     >
                       <SelectTrigger className="h-8">
                         <SelectValue placeholder="—" />
                       </SelectTrigger>
                       <SelectContent>
-                        {STATUS_OPTIONS.map((s) => (
-                          <SelectItem key={s} value={s}>
-                            {s}
+                        <SelectItem value="__none__">— ninguém —</SelectItem>
+                        {(usersQ.data ?? []).map((u) => (
+                          <SelectItem key={u.id} value={u.id}>
+                            {u.display_name}
                           </SelectItem>
                         ))}
                       </SelectContent>
                     </Select>
                   ) : (
-                    <span className="text-sm">{it.status ?? "—"}</span>
+                    <span className="text-sm">{it.envolvido_name ?? "—"}</span>
                   )}
+                </TableCell>
+                <TableCell className="min-w-[120px]">
+                  {editable ? (
+                    <Select
+                      value={it.prioridade}
+                      onValueChange={(v) =>
+                        update.mutate({
+                          id: it.id,
+                          prioridade: v as "alta" | "media" | "baixa",
+                        })
+                      }
+                    >
+                      <SelectTrigger className="h-8">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {PRIORIDADE_OPTIONS.map((p) => (
+                          <SelectItem key={p.value} value={p.value}>
+                            {p.label}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  ) : (
+                    <Badge
+                      variant="outline"
+                      className={prioridadeInfo(it.prioridade).className}
+                    >
+                      {prioridadeInfo(it.prioridade).label}
+                    </Badge>
+                  )}
+                </TableCell>
+                <TableCell className="min-w-[110px]">
+                  <Badge
+                    variant="outline"
+                    className={statusFromPrazo(it.validade).className}
+                  >
+                    {statusFromPrazo(it.validade).label}
+                  </Badge>
                 </TableCell>
                 <TableCell className="min-w-[160px]">
                   {editable ? (
@@ -1292,6 +1385,21 @@ function ListaTable({
                       adicionar…
                     </button>
                   )}
+                </TableCell>
+                <TableCell className="text-center">
+                  <button
+                    type="button"
+                    onClick={() =>
+                      favM.mutate({ item_id: it.id, favorito: !it.favorito })
+                    }
+                    className="text-muted-foreground transition hover:text-amber-500"
+                    title={it.favorito ? "Remover dos favoritos" : "Adicionar aos favoritos"}
+                    aria-label="Favoritar"
+                  >
+                    <Star
+                      className={`h-4 w-4 ${it.favorito ? "fill-amber-400 text-amber-400" : ""}`}
+                    />
+                  </button>
                 </TableCell>
               </TableRow>
             );
