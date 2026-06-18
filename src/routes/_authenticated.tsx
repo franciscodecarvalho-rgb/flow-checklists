@@ -4,9 +4,18 @@ import { AppHeader } from "@/components/AppHeader";
 import { clearStoredAuthSession } from "@/lib/auth-storage";
 
 export const Route = createFileRoute("/_authenticated")({
+  ssr: false,
   beforeLoad: async ({ location }) => {
-    const { data, error } = await supabase.auth.getUser();
-    if (error || !data.user) {
+    try {
+      const { data, error } = await supabase.auth.getUser();
+      if (!error && data.user) return { user: data.user };
+
+      clearStoredAuthSession();
+      throw redirect({
+        to: "/login",
+        search: { redirect: location.href },
+      });
+    } catch {
       clearStoredAuthSession();
       throw redirect({
         to: "/login",
