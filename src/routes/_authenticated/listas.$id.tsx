@@ -409,6 +409,8 @@ function ListDetailPage() {
         </>
       )}
 
+      <ListHistory events={q.data.events} />
+
       <ItemSheet
         open={!!openItemId}
         onOpenChange={(v) => { if (!v) setOpenItemId(null); }}
@@ -416,6 +418,63 @@ function ListDetailPage() {
         listId={id}
         canEdit={canEditItems}
       />
+    </div>
+  );
+}
+
+type ListEvent = {
+  id: string;
+  tipo: "archived" | "unarchived" | "transferred";
+  created_at: string;
+  author_name: string;
+  comentario: string | null;
+  to_name: string | null;
+  from_name: string | null;
+};
+
+const LIST_EVENT_META: Record<
+  ListEvent["tipo"],
+  { label: string; Icon: typeof Archive }
+> = {
+  archived: { label: "Lista arquivada", Icon: Archive },
+  unarchived: { label: "Lista desarquivada", Icon: ArchiveRestore },
+  transferred: { label: "Titularidade transferida", Icon: UserCog },
+};
+
+function ListHistory({ events }: { events: ListEvent[] }) {
+  if (!events || events.length === 0) return null;
+  return (
+    <div className="space-y-2">
+      <h2 className="text-sm font-semibold text-muted-foreground">
+        Histórico da lista
+      </h2>
+      <ul className="space-y-2">
+        {events.map((e) => {
+          const { label, Icon } = LIST_EVENT_META[e.tipo];
+          return (
+            <li key={e.id} className="rounded-md border bg-card p-3 text-sm">
+              <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                <Icon className="h-3 w-3" />
+                <span className="font-medium text-foreground">{label}</span>
+                <span>·</span>
+                <span>{e.author_name}</span>
+                <span>·</span>
+                <span>{new Date(e.created_at).toLocaleString("pt-BR")}</span>
+              </div>
+              <div className="mt-1">
+                {e.tipo === "transferred" ? (
+                  <p className="text-muted-foreground">
+                    {e.from_name ? `de ${e.from_name} ` : ""}para{" "}
+                    <span className="text-foreground">{e.to_name ?? "—"}</span>
+                  </p>
+                ) : e.comentario ? (
+                  <p className="whitespace-pre-wrap">{e.comentario}</p>
+                ) : null}
+              </div>
+            </li>
+          );
+        })}
+      </ul>
     </div>
   );
 }

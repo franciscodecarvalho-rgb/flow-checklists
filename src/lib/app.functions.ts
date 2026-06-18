@@ -14,6 +14,8 @@ export type ItemEventType =
   | "unarchived"
   | "ticket_opened";
 
+export type ListEventType = "archived" | "unarchived" | "transferred";
+
 const db = (ctx: { supabase: unknown }) => ctx.supabase as any;
 
 // ----- helpers -----
@@ -270,6 +272,22 @@ export const getListDetail = createServerFn({ method: "GET" })
       .order("ordem", { ascending: true });
     if (itemsErr) throw safeDbError(itemsErr);
 
+    const { data: events, error: eventsErr } = await supa
+      .from("list_events")
+      .select("id, tipo, payload, created_at, author_id")
+      .eq("list_id", data.id)
+      .order("created_at", { ascending: false });
+    if (eventsErr) throw safeDbError(eventsErr);
+
+    type ListEventRow = {
+      id: string;
+      tipo: ListEventType;
+      payload: Record<string, string | null> | null;
+      created_at: string;
+      author_id: string | null;
+    };
+    const eventRows = (events ?? []) as ListEventRow[];
+
     type ItemRow = {
       id: string;
       texto: string;
@@ -288,6 +306,9 @@ export const getListDetail = createServerFn({ method: "GET" })
       list.owner_id as string,
       list.archived_by as string | null,
       ...itemRows.map((i) => i.responsavel_id),
+      ...eventRows.map((e) => e.author_id),
+      ...eventRows.map((e) => e.payload?.from ?? null),
+      ...eventRows.map((e) => e.payload?.to ?? null),
     ]);
 
     return {
@@ -303,6 +324,15 @@ export const getListDetail = createServerFn({ method: "GET" })
       items: itemRows.map((i) => ({
         ...i,
         responsavel_name: i.responsavel_id ? names.get(i.responsavel_id) ?? "—" : null,
+      })),
+      events: eventRows.map((e) => ({
+        id: e.id,
+        tipo: e.tipo,
+        created_at: e.created_at,
+        author_name: (e.author_id && names.get(e.author_id)) || "Sistema",
+        comentario: e.payload?.comentario ?? null,
+        to_name: e.payload?.to ? names.get(e.payload.to) ?? "—" : null,
+        from_name: e.payload?.from ? names.get(e.payload.from) ?? "—" : null,
       })),
     };
   });
@@ -447,18 +477,20 @@ export const archiveList = createServerFn({ method: "POST" })
   )
   .handler(async ({ data, context }) => {
     const supa = db(context);
-    // Insere comentário primeiro (visível mesmo se o arquivamento falhar por itens ativos
-    // não, melhor: arquiva primeiro; se falhar, o comentário vira ruído).
+    // Arquiva primeiro: o trigger lists_before_update pode recusar (itens ativos,
+    // não-dono). Só registramos o evento se o arquivamento de fato ocorreu, para
+    // o comentário não virar ruído de uma operação que falhou.
     const { error } = await supa
       .from("lists")
       .update({ archived_at: new Date().toISOString() })
       .eq("id", data.id);
     if (error) throw safeDbError(error);
-    // Comentário fica como observação textual no histórico da lista? Por enquanto não temos
-    // tabela de eventos de lista. Guardamos a justificativa como o "último update" registrado
-    // pelo trigger; se quisermos histórico de lista depois, criamos `list_events`.
-    // (Comentário é exigido por contrato com o usuário, mesmo que o destino seja só auditoria futura.)
-    void data.comentario;
+    await supa.from("list_events").insert({
+      list_id: data.id,
+      author_id: context.userId,
+      tipo: "archived",
+      payload: { comentario: data.comentario },
+    });
     return { ok: true };
   });
 
@@ -466,11 +498,18 @@ export const unarchiveList = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator((input) => z.object({ id: z.string().uuid() }).parse(input))
   .handler(async ({ data, context }) => {
-    const { error } = await db(context)
+    const supa = db(context);
+    const { error } = await supa
       .from("lists")
       .update({ archived_at: null })
       .eq("id", data.id);
     if (error) throw safeDbError(error);
+    await supa.from("list_events").insert({
+      list_id: data.id,
+      author_id: context.userId,
+      tipo: "unarchived",
+      payload: {},
+    });
     return { ok: true };
   });
 
@@ -484,11 +523,23 @@ export const transferList = createServerFn({ method: "POST" })
   )
   .handler(async ({ data, context }) => {
     await assertAdmin(context);
-    const { error } = await db(context)
+    const supa = db(context);
+    const { data: prev } = await supa
+      .from("lists")
+      .select("owner_id")
+      .eq("id", data.id)
+      .maybeSingle();
+    const { error } = await supa
       .from("lists")
       .update({ owner_id: data.new_owner_id })
       .eq("id", data.id);
     if (error) throw safeDbError(error);
+    await supa.from("list_events").insert({
+      list_id: data.id,
+      author_id: context.userId,
+      tipo: "transferred",
+      payload: { from: (prev?.owner_id as string | null) ?? null, to: data.new_owner_id },
+    });
     return { ok: true };
   });
 
@@ -766,15 +817,13 @@ export const reorderItems = createServerFn({ method: "POST" })
     }).parse(input),
   )
   .handler(async ({ data, context }) => {
-    const supa = db(context);
-    const updates = data.ordered_ids.map((id, idx) => ({ id, ordem: (idx + 1) * 10 }));
-    const results = await Promise.all(
-      updates.map((u) =>
-        supa.from("items").update({ ordem: u.ordem }).eq("id", u.id).eq("list_id", data.list_id),
-      ),
-    );
-    const firstErr = results.find((r) => r.error);
-    if (firstErr?.error) throw safeDbError(firstErr.error);
+    // Uma única transação no banco (RPC) em vez de N UPDATEs paralelos: ou
+    // toda a nova ordem é aplicada, ou nada — sem estado intermediário inconsistente.
+    const { error } = await db(context).rpc("reorder_items", {
+      p_list_id: data.list_id,
+      p_ordered_ids: data.ordered_ids,
+    });
+    if (error) throw safeDbError(error);
     return { ok: true };
   });
 
