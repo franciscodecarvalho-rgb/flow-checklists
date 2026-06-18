@@ -11,7 +11,6 @@ import {
 } from "@/lib/app.functions";
 import { useAuth } from "@/lib/auth-context";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
@@ -63,18 +62,44 @@ function HomePage() {
   const [q, setQ] = useState("");
   const [open, setOpen] = useState(false);
 
-  const grouped = useMemo(() => {
-    if (!homeQ.data) return [];
+  const stats = useMemo(() => {
+    let atrasados = 0;
+    let hoje = 0;
+    let amanha = 0;
+    for (const l of homeQ.data?.lists ?? []) {
+      for (const it of l.items) {
+        const d = daysUntil(it.proxima_checagem);
+        if (!Number.isFinite(d)) continue;
+        if (d < 0) atrasados++;
+        else if (d === 0) hoje++;
+        else if (d === 1) amanha++;
+      }
+    }
+    return { atrasados, hoje, amanha };
+  }, [homeQ.data]);
+
+  const { checklists, listas } = useMemo(() => {
     const term = q.trim().toLowerCase();
-    return homeQ.data.areas
-      .map((a) => ({
-        area: a,
-        lists: homeQ.data!.lists
-          .filter((l) => l.area_id === a.id)
-          .filter((l) => !term || l.titulo.toLowerCase().includes(term)),
+    const data = homeQ.data;
+    const areaName = new Map((data?.areas ?? []).map((a) => [a.id, a.nome] as const));
+    const areaOrder = new Map((data?.areas ?? []).map((a) => [a.id, a.ordem] as const));
+    const enriched = (data?.lists ?? [])
+      .filter((l) => !term || l.titulo.toLowerCase().includes(term))
+      .map((l) => ({
+        ...l,
+        area_nome: areaName.get(l.area_id) ?? "—",
+        area_ordem: areaOrder.get(l.area_id) ?? 0,
       }))
-      .filter(({ lists }) => lists.length > 0);
+      .sort(
+        (a, b) => a.area_ordem - b.area_ordem || a.titulo.localeCompare(b.titulo),
+      );
+    return {
+      checklists: enriched.filter((l) => l.tipo !== "lista"),
+      listas: enriched.filter((l) => l.tipo === "lista"),
+    };
   }, [homeQ.data, q]);
+
+  const total = checklists.length + listas.length;
 
   return (
     <div className="space-y-6">
@@ -115,64 +140,149 @@ function HomePage() {
         </div>
       </div>
 
+      <div className="grid grid-cols-3 gap-3">
+        <StatTile label="Atrasados" value={stats.atrasados} tone="red" />
+        <StatTile label="Hoje" value={stats.hoje} tone="amber" />
+        <StatTile label="Amanhã" value={stats.amanha} tone="neutral" />
+      </div>
+
       {homeQ.isLoading && <p className="text-muted-foreground">Carregando…</p>}
       {homeQ.error && (
         <p className="text-destructive">Erro ao carregar: {(homeQ.error as Error).message}</p>
       )}
 
-      {grouped.length === 0 && !homeQ.isLoading && (
+      {total === 0 && !homeQ.isLoading && !homeQ.error && (
         <EmptyState message={q ? "Nenhuma lista encontrada." : "Nenhuma lista ainda. Clique em “Nova lista” para começar."} />
       )}
 
-      <div className="space-y-8">
-        {grouped.map(({ area, lists }) => (
-          <section key={area.id} className="space-y-3">
-            <h2 className="text-lg font-semibold">{area.nome}</h2>
-            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-              {lists.map((l) => {
-                const isLista = l.tipo === "lista";
-                const sorted = [...l.items].sort(
-                  (a, b) => daysUntil(a.proxima_checagem) - daysUntil(b.proxima_checagem),
-                );
-                const next = sorted[0];
-                const nextDays = next ? daysUntil(next.proxima_checagem) : Number.POSITIVE_INFINITY;
-                return (
-                  <Link key={l.id} to="/listas/$id" params={{ id: l.id }} className="block">
-                    <Card className="h-full transition hover:border-primary/50 hover:shadow-md">
-                      <CardHeader className="pb-2">
-                        <div className="flex items-start justify-between gap-2">
-                          <CardTitle className="text-base">{l.titulo}</CardTitle>
-                          <Badge variant="outline" className="shrink-0 text-[10px] uppercase tracking-wide">
-                            {isLista ? "Lista" : "Checklist"}
-                          </Badge>
-                        </div>
-                        <p className="text-xs text-muted-foreground">por {l.owner_name}</p>
-                      </CardHeader>
-                      <CardContent className="flex flex-wrap gap-2 text-xs">
-                        <Badge variant="secondary">{l.items.length} itens</Badge>
-                        {isLista ? null : next ? (
-                          <Badge variant="outline" className={bucketClass(nextDays)}>
-                            próx.{" "}
-                            {nextDays < 0
-                              ? `há ${Math.abs(nextDays)}d`
-                              : nextDays === 0
-                                ? "hoje"
-                                : `em ${nextDays}d`}
-                          </Badge>
-                        ) : (
-                          <Badge variant="outline">sem itens ativos</Badge>
-                        )}
-                      </CardContent>
-                    </Card>
-                  </Link>
-                );
-              })}
-
-            </div>
-          </section>
-        ))}
-      </div>
+      {total > 0 && (
+        <div className="grid gap-6 lg:grid-cols-2">
+          <ListColumn
+            title="Checklists"
+            emptyMsg="Nenhum checklist."
+            lists={checklists.map((l) => ({
+              id: l.id,
+              titulo: l.titulo,
+              area: l.area_nome,
+              count: l.items.length,
+              nextDays: nextDaysOf(l.items),
+            }))}
+          />
+          <ListColumn
+            title="Listas"
+            emptyMsg="Nenhuma lista."
+            lists={listas.map((l) => ({
+              id: l.id,
+              titulo: l.titulo,
+              area: l.area_nome,
+              count: l.items.length,
+              nextDays: null,
+            }))}
+          />
+        </div>
+      )}
     </div>
+  );
+}
+
+function nextDaysOf(items: { proxima_checagem: string | null }[]): number | null {
+  let min = Number.POSITIVE_INFINITY;
+  for (const it of items) {
+    const d = daysUntil(it.proxima_checagem);
+    if (d < min) min = d;
+  }
+  return Number.isFinite(min) ? min : null;
+}
+
+function StatTile({
+  label,
+  value,
+  tone,
+}: {
+  label: string;
+  value: number;
+  tone: "red" | "amber" | "neutral";
+}) {
+  const toneClass =
+    tone === "red"
+      ? "border-red-500/40 bg-red-500/10"
+      : tone === "amber"
+        ? "border-amber-500/40 bg-amber-500/10"
+        : "border-border bg-card";
+  return (
+    <div className={`rounded-lg border p-3 ${toneClass}`}>
+      <div className="text-2xl font-semibold leading-none tabular-nums">{value}</div>
+      <div className="mt-1 text-xs text-muted-foreground">{label}</div>
+    </div>
+  );
+}
+
+type CardData = {
+  id: string;
+  titulo: string;
+  area: string;
+  count: number;
+  nextDays: number | null;
+};
+
+function ListColumn({
+  title,
+  emptyMsg,
+  lists,
+}: {
+  title: string;
+  emptyMsg: string;
+  lists: CardData[];
+}) {
+  return (
+    <section className="space-y-2">
+      <div className="flex items-center justify-between">
+        <h2 className="text-sm font-semibold">{title}</h2>
+        <Badge variant="secondary">{lists.length}</Badge>
+      </div>
+      {lists.length === 0 ? (
+        <p className="rounded-md border border-dashed p-4 text-center text-xs text-muted-foreground">
+          {emptyMsg}
+        </p>
+      ) : (
+        <div className="space-y-2">
+          {lists.map((l) => (
+            <CompactCard key={l.id} {...l} />
+          ))}
+        </div>
+      )}
+    </section>
+  );
+}
+
+function CompactCard({ id, titulo, area, count, nextDays }: CardData) {
+  return (
+    <Link to="/listas/$id" params={{ id }} className="block">
+      <div className="rounded-md border bg-card px-3 py-2 transition hover:border-primary/50 hover:shadow-sm">
+        <div className="flex items-center justify-between gap-2">
+          <span className="truncate text-sm font-medium">{titulo}</span>
+          {nextDays !== null && (
+            <Badge
+              variant="outline"
+              className={`shrink-0 text-[10px] ${bucketClass(nextDays)}`}
+            >
+              {nextDays < 0
+                ? `atrasado ${Math.abs(nextDays)}d`
+                : nextDays === 0
+                  ? "hoje"
+                  : `em ${nextDays}d`}
+            </Badge>
+          )}
+        </div>
+        <div className="mt-0.5 flex items-center gap-1.5 text-xs text-muted-foreground">
+          <span className="truncate">{area}</span>
+          <span>·</span>
+          <span className="shrink-0">
+            {count} {count === 1 ? "item" : "itens"}
+          </span>
+        </div>
+      </div>
+    </Link>
   );
 }
 
