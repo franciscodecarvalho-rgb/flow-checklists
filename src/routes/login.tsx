@@ -21,16 +21,16 @@ export const Route = createFileRoute("/login")({
 function LoginPage() {
   const navigate = useNavigate();
   const search = Route.useSearch();
-  const { session } = useAuth();
+  const { user, loading } = useAuth();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [submitting, setSubmitting] = useState(false);
 
   useEffect(() => {
-    if (session) {
+    if (!loading && user) {
       navigate({ to: search.redirect ?? "/", replace: true });
     }
-  }, [session, navigate, search.redirect]);
+  }, [loading, user, navigate, search.redirect]);
 
   const handleSubmit = async (e: FormEvent) => {
     e.preventDefault();

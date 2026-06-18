@@ -35,17 +35,39 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     let mounted = true;
 
-    // Initial session load
-    supabase.auth.getSession().then(({ data }) => {
+    // Initial session load: verify the token before exposing a session to the UI.
+    // A stale local session could otherwise redirect /login back to / and trip the
+    // route error boundary before the user has a chance to sign in again.
+    supabase.auth.getSession().then(async ({ data }) => {
       if (!mounted) return;
+      if (!data.session) {
+        setSession(null);
+        setProfile(null);
+        setLoading(false);
+        return;
+      }
+
+      const { data: userData, error } = await supabase.auth.getUser();
+      if (!mounted) return;
+      if (error || !userData.user) {
+        await supabase.auth.signOut({ scope: "local" }).catch(() => undefined);
+        if (!mounted) return;
+        setSession(null);
+        setProfile(null);
+        setLoading(false);
+        return;
+      }
+
       setSession(data.session);
       setLoading(false);
     });
 
     const {
       data: { subscription },
-    } = supabase.auth.onAuthStateChange((_event, newSession) => {
+    } = supabase.auth.onAuthStateChange((event, newSession) => {
+      if (event === "INITIAL_SESSION") return;
       setSession(newSession);
+      if (!newSession) setProfile(null);
       setLoading(false);
       // Invalidate router + queries when auth state changes
       router.invalidate();
