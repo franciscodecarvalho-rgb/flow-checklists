@@ -7,7 +7,33 @@ type ServerEntry = {
   fetch: (request: Request, env: unknown, ctx: unknown) => Promise<Response> | Response;
 };
 
+type RuntimeEnv = Record<string, unknown>;
+
 let serverEntryPromise: Promise<ServerEntry> | undefined;
+
+function firstString(...values: unknown[]): string | undefined {
+  return values.find((value): value is string => typeof value === "string" && value.length > 0);
+}
+
+function applyRuntimeEnvAliases(env: unknown) {
+  const runtimeEnv = env && typeof env === "object" ? (env as RuntimeEnv) : {};
+  const processEnv = (globalThis as typeof globalThis & {
+    process?: { env?: Record<string, string | undefined> };
+  }).process?.env;
+
+  if (!processEnv) return;
+
+  processEnv.SUPABASE_URL ??= firstString(
+    runtimeEnv.SUPABASE_URL,
+    runtimeEnv.VITE_SUPABASE_URL,
+    processEnv.VITE_SUPABASE_URL,
+  );
+  processEnv.SUPABASE_PUBLISHABLE_KEY ??= firstString(
+    runtimeEnv.SUPABASE_PUBLISHABLE_KEY,
+    runtimeEnv.VITE_SUPABASE_PUBLISHABLE_KEY,
+    processEnv.VITE_SUPABASE_PUBLISHABLE_KEY,
+  );
+}
 
 async function getServerEntry(): Promise<ServerEntry> {
   if (!serverEntryPromise) {
@@ -69,6 +95,7 @@ async function normalizeCatastrophicSsrResponse(response: Response): Promise<Res
 export default {
   async fetch(request: Request, env: unknown, ctx: unknown) {
     try {
+      applyRuntimeEnvAliases(env);
       const handler = await getServerEntry();
       const response = await handler.fetch(request, env, ctx);
       return await normalizeCatastrophicSsrResponse(response);
