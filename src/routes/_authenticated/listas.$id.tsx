@@ -164,7 +164,7 @@ function ListDetailPage() {
   const isOwner = q.data?.owner_id === user?.id;
   const isAdmin = !!profile?.is_admin;
   const canEditList = isOwner || isAdmin;
-  const canEditItems = isOwner;
+  const canEditItems = isOwner || isAdmin;
   const listArchived = !!q.data?.archived_at;
 
   const createI = useServerFn(createItem);
