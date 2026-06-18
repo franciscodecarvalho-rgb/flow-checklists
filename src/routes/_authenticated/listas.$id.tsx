@@ -1085,7 +1085,7 @@ function NewListaItemForm({
     >
       <div className="grid gap-3 sm:grid-cols-2">
         <div className="space-y-1 sm:col-span-2">
-          <Label>Item / Documento *</Label>
+          <Label>Item *</Label>
           <Input
             value={texto}
             onChange={(e) => setTexto(e.target.value)}
@@ -1124,7 +1124,7 @@ function NewListaItemForm({
           </Select>
         </div>
         <div className="space-y-1">
-          <Label>Validade</Label>
+          <Label>Prazo</Label>
           <Input type="date" value={validade} onChange={(e) => setValidade(e.target.value)} />
         </div>
         <div className="space-y-1">
@@ -1182,10 +1182,10 @@ function ListaTable({
       <Table>
         <TableHeader>
           <TableRow>
-            <TableHead className="w-[32%]">Item / Documento</TableHead>
+            <TableHead className="w-[32%]">Item</TableHead>
             <TableHead>Responsável</TableHead>
             <TableHead>Status</TableHead>
-            <TableHead>Validade</TableHead>
+            <TableHead>Prazo</TableHead>
             <TableHead>Link</TableHead>
           </TableRow>
         </TableHeader>

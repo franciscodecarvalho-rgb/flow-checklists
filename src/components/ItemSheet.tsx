@@ -334,7 +334,7 @@ function ItemSheetBody({
               />
             </div>
             <div className="space-y-2">
-              <Label>Validade</Label>
+              <Label>Prazo</Label>
               <Input
                 type="date"
                 value={validade}
@@ -428,51 +428,6 @@ function ItemSheetBody({
         </div>
       )}
 
-      {/* ---- archive / unarchive ---- */}
-      {canEdit && (
-        <div className="space-y-2 rounded-md border bg-card p-4">
-          {isArchived ? (
-            <>
-              <Label>Desarquivar</Label>
-              <div className="flex gap-2">
-                <Input
-                  type="date"
-                  value={unarchDate}
-                  onChange={(e) => setUnarchDate(e.target.value)}
-                />
-                <Button
-                  variant="outline"
-                  disabled={!unarchDate || unarchM.isPending}
-                  onClick={() => unarchM.mutate(unarchDate)}
-                >
-                  <ArchiveRestore className="h-4 w-4" /> Desarquivar
-                </Button>
-              </div>
-            </>
-          ) : (
-            <>
-              <Label>Arquivar item</Label>
-              <Textarea
-                value={archText}
-                onChange={(e) => setArchText(e.target.value)}
-                rows={2}
-                maxLength={2000}
-                placeholder="Motivo do arquivamento (obrigatório)…"
-              />
-              <div className="flex justify-end">
-                <Button
-                  variant="outline"
-                  disabled={!archText.trim() || archM.isPending}
-                  onClick={() => archM.mutate(archText.trim())}
-                >
-                  <Archive className="h-4 w-4" /> Arquivar
-                </Button>
-              </div>
-            </>
-          )}
-        </div>
-      )}
-
       {/* ---- adicionar andamento (qualquer usuário autenticado) ---- */}
       <div className="space-y-2 rounded-md border bg-card p-4">
         <Label>Adicionar andamento</Label>
@@ -521,6 +476,51 @@ function ItemSheetBody({
           </ul>
         )}
       </div>
+
+      {/* ---- archive / unarchive (por último) ---- */}
+      {canEdit && (
+        <div className="space-y-2 rounded-md border bg-card p-4">
+          {isArchived ? (
+            <>
+              <Label>Desarquivar</Label>
+              <div className="flex gap-2">
+                <Input
+                  type="date"
+                  value={unarchDate}
+                  onChange={(e) => setUnarchDate(e.target.value)}
+                />
+                <Button
+                  variant="outline"
+                  disabled={!unarchDate || unarchM.isPending}
+                  onClick={() => unarchM.mutate(unarchDate)}
+                >
+                  <ArchiveRestore className="h-4 w-4" /> Desarquivar
+                </Button>
+              </div>
+            </>
+          ) : (
+            <>
+              <Label>Arquivar item</Label>
+              <Textarea
+                value={archText}
+                onChange={(e) => setArchText(e.target.value)}
+                rows={2}
+                maxLength={2000}
+                placeholder="Motivo do arquivamento (obrigatório)…"
+              />
+              <div className="flex justify-end">
+                <Button
+                  variant="outline"
+                  disabled={!archText.trim() || archM.isPending}
+                  onClick={() => archM.mutate(archText.trim())}
+                >
+                  <Archive className="h-4 w-4" /> Arquivar
+                </Button>
+              </div>
+            </>
+          )}
+        </div>
+      )}
     </div>
   );
 }
