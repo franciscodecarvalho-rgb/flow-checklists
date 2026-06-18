@@ -185,6 +185,48 @@ export type Database = {
           },
         ]
       }
+      list_events: {
+        Row: {
+          author_id: string
+          created_at: string
+          id: string
+          list_id: string
+          payload: Json
+          tipo: Database["public"]["Enums"]["list_event_type"]
+        }
+        Insert: {
+          author_id: string
+          created_at?: string
+          id?: string
+          list_id: string
+          payload?: Json
+          tipo: Database["public"]["Enums"]["list_event_type"]
+        }
+        Update: {
+          author_id?: string
+          created_at?: string
+          id?: string
+          list_id?: string
+          payload?: Json
+          tipo?: Database["public"]["Enums"]["list_event_type"]
+        }
+        Relationships: [
+          {
+            foreignKeyName: "list_events_author_id_fkey"
+            columns: ["author_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "list_events_list_id_fkey"
+            columns: ["list_id"]
+            isOneToOne: false
+            referencedRelation: "lists"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       lists: {
         Row: {
           archived_at: string | null
@@ -274,6 +316,10 @@ export type Database = {
     Functions: {
       is_admin: { Args: { _user_id: string }; Returns: boolean }
       is_list_owner: { Args: { _list_id: string }; Returns: boolean }
+      reorder_items: {
+        Args: { p_list_id: string; p_ordered_ids: string[] }
+        Returns: undefined
+      }
     }
     Enums: {
       item_event_type:
@@ -284,6 +330,7 @@ export type Database = {
         | "archived"
         | "unarchived"
         | "ticket_opened"
+      list_event_type: "archived" | "unarchived" | "transferred"
     }
     CompositeTypes: {
       [_ in never]: never
@@ -420,6 +467,7 @@ export const Constants = {
         "unarchived",
         "ticket_opened",
       ],
+      list_event_type: ["archived", "unarchived", "transferred"],
     },
   },
 } as const
