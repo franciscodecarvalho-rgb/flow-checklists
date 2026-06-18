@@ -3,6 +3,7 @@ import type { Session, User } from "@supabase/supabase-js";
 import { useRouter } from "@tanstack/react-router";
 import { useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
+import { clearStoredAuthSession } from "@/lib/auth-storage";
 
 type Profile = {
   id: string;
@@ -38,29 +39,37 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     // Initial session load: verify the token before exposing a session to the UI.
     // A stale local session could otherwise redirect /login back to / and trip the
     // route error boundary before the user has a chance to sign in again.
-    supabase.auth.getSession().then(async ({ data }) => {
-      if (!mounted) return;
-      if (!data.session) {
-        setSession(null);
-        setProfile(null);
-        setLoading(false);
-        return;
-      }
+    supabase.auth
+      .getSession()
+      .then(async ({ data }) => {
+        if (!mounted) return;
+        if (!data.session) {
+          setSession(null);
+          setProfile(null);
+          setLoading(false);
+          return;
+        }
 
-      const { data: userData, error } = await supabase.auth.getUser();
-      if (!mounted) return;
-      if (error || !userData.user) {
-        await supabase.auth.signOut({ scope: "local" }).catch(() => undefined);
+        const { data: userData, error } = await supabase.auth.getUser();
+        if (!mounted) return;
+        if (error || !userData.user) {
+          clearStoredAuthSession();
+          setSession(null);
+          setProfile(null);
+          setLoading(false);
+          return;
+        }
+
+        setSession(data.session);
+        setLoading(false);
+      })
+      .catch(() => {
+        clearStoredAuthSession();
         if (!mounted) return;
         setSession(null);
         setProfile(null);
         setLoading(false);
-        return;
-      }
-
-      setSession(data.session);
-      setLoading(false);
-    });
+      });
 
     const {
       data: { subscription },
