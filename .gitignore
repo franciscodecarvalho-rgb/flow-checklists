@@ -17,8 +17,9 @@ dist-ssr
 *.local
 
 # Environment / secrets
-.env
+# Keep Lovable Cloud's generated public VITE_* backend config available to preview builds.
 .env.*
+!.env
 !.env.example
 
 # npm lockfile (this project uses bun — bun.lock is the source of truth)
