@@ -16,6 +16,14 @@ dist-ssr
 .nitro
 *.local
 
+# Environment / secrets
+.env
+.env.*
+!.env.example
+
+# npm lockfile (this project uses bun — bun.lock is the source of truth)
+package-lock.json
+
 # Wrangler / Cloudflare
 .wrangler/
 .dev.vars
