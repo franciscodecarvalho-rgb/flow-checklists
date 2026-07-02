@@ -263,13 +263,15 @@ export const getListDetail = createServerFn({ method: "GET" })
     if (error) throw safeDbError(error);
     if (!list) throw new Error("Lista não encontrada");
 
-    const { data: items, error: itemsErr } = await supa
+    const isLista = list.tipo === "lista";
+    const itemsQuery = supa
       .from("items")
       .select("id, texto, proxima_checagem, periodicidade_dias, ordem, archived_at, responsavel_id, envolvido_id, prioridade, status, validade, link")
       .eq("list_id", data.id)
-      .order("archived_at", { ascending: true, nullsFirst: true })
-      .order("proxima_checagem", { ascending: true, nullsFirst: false })
-      .order("ordem", { ascending: true });
+      .order("archived_at", { ascending: true, nullsFirst: true });
+    const { data: items, error: itemsErr } = await (isLista
+      ? itemsQuery.order("ordem", { ascending: true }).order("proxima_checagem", { ascending: true, nullsFirst: false })
+      : itemsQuery.order("proxima_checagem", { ascending: true, nullsFirst: false }).order("ordem", { ascending: true }));
     if (itemsErr) throw safeDbError(itemsErr);
 
     const { data: events, error: eventsErr } = await supa
